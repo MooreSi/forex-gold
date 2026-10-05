@@ -56,6 +56,8 @@ import logging
 
 from backend.src.services.risk import governor as _gov
 from backend.src.services.risk import lot_sizing
+from backend.src.services.risk.schedule import check_trading_schedule
+from backend.src.utils.news_calendar import check_news_blackout
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -273,6 +275,20 @@ async def handle_limit_order_signal(
                     tg_id, f": {_why}" if _why else "")
         return {"skip_reason": "Limit order skipped — trading paused"
                                + (f": {_why}." if _why else ".")}
+
+    # The Trading Schedule (windows, per-window and daily profit targets) and
+    # the news blackout, the two gates scan_auto_execute.py carries beside the
+    # trend gate below. This route never passes through it, so 13 orders were
+    # placed over the day's target on 2026-09-16 and one that filled was
+    # force-closed at a loss (bugs/064). Ahead of both exits.
+    _sched_ok, _sched_reason = check_trading_schedule(source=channel_name)
+    if not _sched_ok:
+        log.info("[LimitRunner] tg_id=%s blocked by Trading Schedule: %s", tg_id, _sched_reason)
+        return {"skip_reason": f"Limit order skipped — Trading Schedule: {_sched_reason}"}
+    _news_ok, _news_reason = check_news_blackout()
+    if not _news_ok:
+        log.info("[LimitRunner] tg_id=%s blocked by news blackout: %s", tg_id, _news_reason)
+        return {"skip_reason": f"Limit order skipped — {_news_reason}"}
 
     from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()

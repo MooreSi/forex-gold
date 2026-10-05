@@ -351,6 +351,56 @@ def resume_past_daily_profit_target(
     _maybe_forward_trading_schedule(_from_sync)
 
 
+# Once reached, a target stays reached for the day (bugs/064, handover 038
+# option A). Without this the gate compared the live sum with the target, so a
+# later loss -- once the guard's own force-close -- re-opened trading under
+# a refusal that said "resumes tomorrow". Stored as {"day", "daily",
+# "windows": {"HH:MM-HH:MM": target}}; a different day reads as empty, so it
+# expires at midnight by construction like DAILY_TARGET_RESUMED_KEY. A latch
+# only holds while the configured target is no higher than the one it
+# latched at: a raised target has not been reached.
+TARGET_REACHED_KEY = "trading_schedule_target_reached_day"
+_EARLIER = ", reached earlier today"
+
+
+def _reached_today(now: datetime) -> dict:
+    try:
+        raw = json.loads(db_module.get_app_config(TARGET_REACHED_KEY) or "{}")
+    except (TypeError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict) or raw.get("day") != _day_key(now):
+        return {"day": _day_key(now), "daily": 0.0, "windows": {}}
+    raw.setdefault("daily", 0.0)
+    raw.setdefault("windows", {})
+    return raw
+
+
+def _latch(now: datetime, window: Optional[str], target: float) -> None:
+    state = _reached_today(now)
+    if window is None:
+        state["daily"] = max(float(state["daily"] or 0), target)
+    else:
+        state["windows"][window] = max(float(state["windows"].get(window) or 0), target)
+    db_module.set_app_config(TARGET_REACHED_KEY, json.dumps(state))
+
+
+def _is_latched(now: datetime, window: Optional[str], target: float) -> bool:
+    state = _reached_today(now)
+    held = state["daily"] if window is None else state["windows"].get(window)
+    return bool(held) and target <= float(held)
+
+
+def _target_reached(now: datetime, window: Optional[str], target: float,
+                    pnl: float) -> bool:
+    """Has this target been reached today -- now, or earlier and latched?"""
+    if _is_latched(now, window, target):
+        return True
+    if pnl >= target:
+        _latch(now, window, target)
+        return True
+    return False
+
+
 def daily_profit_target_state(now: Optional[datetime] = None) -> dict:
     """What the header badge renders: {reached, overridden, pnl, target}.
 
@@ -374,7 +424,7 @@ def daily_profit_target_state(now: Optional[datetime] = None) -> dict:
         pnl = _day_realized_pnl(now)
         overridden = is_daily_profit_target_resumed(now)
         return {
-            "reached": pnl >= target and not overridden,
+            "reached": _target_reached(now, None, target, pnl) and not overridden,
             "overridden": overridden,
             "pnl": pnl,
             "target": target,
@@ -656,9 +706,10 @@ def check_trading_schedule(
     daily_target = get_daily_profit_target()
     if daily_target > 0 and not is_daily_profit_target_resumed(now):
         day_pnl = _day_realized_pnl(now)
-        if day_pnl >= daily_target:
+        if _target_reached(now, None, daily_target, day_pnl):
             return False, (
-                f"daily profit target reached (${day_pnl:.2f} of ${daily_target:.2f}) "
+                f"daily profit target reached (${day_pnl:.2f} of ${daily_target:.2f}"
+                f"{_EARLIER if day_pnl < daily_target else ''}) "
                 "-- resumes tomorrow (Trading > Schedule)"
             )
 
@@ -673,9 +724,10 @@ def check_trading_schedule(
     target = float(block.get("target", 0) or 0)
     if target > 0:
         pnl = _block_realized_pnl(block, now)
-        if pnl >= target:
+        if _target_reached(now, f"{block['start']}-{block['end']}", target, pnl):
             return False, (
-                f"profit target reached for this window (${pnl:.2f} of ${target:.2f}) "
+                f"profit target reached for this window (${pnl:.2f} of ${target:.2f}"
+                f"{_EARLIER if pnl < target else ''}) "
                 "-- resumes at the next scheduled window"
             )
     return True, ""

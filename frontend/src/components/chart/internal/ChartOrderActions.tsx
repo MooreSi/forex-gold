@@ -16,7 +16,9 @@ type Open = "market" | "limit" | "position-market" | "position-limit" | null;
  * The Trading tab's own dialogs, opened from here: the same form, the same
  * review step and confirmation, the same backend refusal. Nothing about how
  * an order is built or sent differs from the Trading tab, and the buttons are
- * disabled for the same reasons, from the same `useOrderGate`.
+ * disabled for the same reasons, from the same `useOrderGate`: Market by any
+ * halt, Limit only by a closed market or an unreachable backend (owner,
+ * 2026-10-05: a manual limit order sits outside any pause).
  *
  * With a position drawing selected, two more buttons fill those dialogs from
  * it: direction, stop and target, and for a limit the entry. They fill; they
@@ -26,12 +28,14 @@ type Open = "market" | "limit" | "position-market" | "position-limit" | null;
 export function ChartOrderActions({
   onPlaced, tick, position,
 }: { onPlaced: () => void; tick?: Tick | null; position?: Drawing | null }) {
-  const { disabledReason } = useOrderGate();
+  const { disabledReason, limitDisabledReason } = useOrderGate();
   const [open, setOpen] = useState<Open>(null);
   const shut = (next: boolean) => { if (!next) setOpen(null); };
   const levels = position ? positionLevels(position.points) : null;
-  const positionReason = disabledReason ?? (levels ? null
-    : "This position is not a trade: the stop and target must be on opposite sides of the entry.");
+  const notATrade = levels ? null
+    : "This position is not a trade: the stop and target must be on opposite sides of the entry.";
+  const positionReason = disabledReason ?? notATrade;
+  const positionLimitReason = limitDisabledReason ?? notATrade;
   // Remount per drawing and per shape, so a moved position refills the form.
   const key = position ? `${position.id}:${JSON.stringify(position.points)}` : "none";
 
@@ -43,7 +47,7 @@ export function ChartOrderActions({
             disabledReason={positionReason}>
             <Plus size={13} /> Market from position
           </Button>
-          <Button onClick={() => setOpen("position-limit")} disabledReason={positionReason}>
+          <Button onClick={() => setOpen("position-limit")} disabledReason={positionLimitReason}>
             <Plus size={13} /> Limit from position
           </Button>
         </>
@@ -51,7 +55,7 @@ export function ChartOrderActions({
       <Button variant="success" onClick={() => setOpen("market")} disabledReason={disabledReason}>
         <Plus size={13} /> Market order
       </Button>
-      <Button onClick={() => setOpen("limit")} disabledReason={disabledReason}>
+      <Button onClick={() => setOpen("limit")} disabledReason={limitDisabledReason}>
         <Plus size={13} /> Limit order
       </Button>
       <PlaceOrderDialog
@@ -64,7 +68,7 @@ export function ChartOrderActions({
         open={open === "limit"}
         onOpenChange={shut}
         onPlaced={onPlaced}
-        disabledReason={disabledReason}
+        disabledReason={limitDisabledReason}
         price={tick}
       />
       {open === "position-market" && levels && (
@@ -83,7 +87,7 @@ export function ChartOrderActions({
           open
           onOpenChange={shut}
           onPlaced={onPlaced}
-          disabledReason={disabledReason}
+          disabledReason={limitDisabledReason}
           price={tick}
           prefill={{
             direction: levels.direction, entry: levels.entry,

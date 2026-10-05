@@ -77,14 +77,45 @@ describe("order buttons on the Chart tab", () => {
     expect(orderCalls()).toEqual([]);
   });
 
-  it("is disabled with the backend's reason when trading is halted", async () => {
+  it("disables Market with the backend's reason when trading is halted", async () => {
     halt = { ...halt, halted: true, reason: "Trading paused by the operator." };
     render(<ChartPanel />);
 
     const market = screen.getByRole("button", { name: /market order/i });
     await waitFor(() => expect(market).toBeDisabled());
     expect(market.getAttribute("title")).toBe("Trading paused by the operator.");
-    expect(screen.getByRole("button", { name: /limit order/i })).toBeDisabled();
+  });
+
+  // Owner, 2026-10-05: a manual Limit order sits outside the daily pause and
+  // any other paused trading, so it stays selectable. The backend already
+  // places it through a pause (manual_limit_order checks neither the pause nor
+  // the breaker; resting_revalidation exempts channel "Manual"). This replaced
+  // the assertion that Limit was disabled with Market.
+  it("keeps Limit selectable when trading is halted", async () => {
+    halt = { ...halt, halted: true, reason: "Daily goal secured: +$30.00" };
+    render(<ChartPanel />);
+
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: /market order/i })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /limit order/i })).toBeEnabled();
+  });
+
+  it("keeps Limit selectable when the circuit breaker has tripped", async () => {
+    halt = { ...halt, circuit_breaker: { is_active: true, remaining_secs: 600, consec_losses: 3 } };
+    render(<ChartPanel />);
+
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: /market order/i })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /limit order/i })).toBeEnabled();
+  });
+
+  it("still disables Limit when the market is closed", async () => {
+    halt = { ...halt, market_closed: true };
+    render(<ChartPanel />);
+
+    const limit = screen.getByRole("button", { name: /limit order/i });
+    await waitFor(() => expect(limit).toBeDisabled());
+    expect(limit.getAttribute("title")).toBe("The market is closed for the week.");
   });
 
   it("is disabled when the market is closed", async () => {

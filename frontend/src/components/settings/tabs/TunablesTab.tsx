@@ -32,6 +32,10 @@ interface Tunable {
  * invisible and uneditable. The test fixture asserted the same invented shape,
  * which is why it went unnoticed until the screen was opened on 2026-09-20.
  *
+ * A save re-reads the catalogue rather than adopting the PUT's answer, which
+ * is a flat `{ key: value }` map: adopted, it emptied every group and the tab
+ * went blank on the first edit of any tunable (owner, 2026-10-05).
+ *
  * Each row shows what the number means, what it defaults to and what it is
  * allowed to be. A tunable with no explanation is one nobody dares change,
  * which makes the screen decorative.
@@ -99,7 +103,8 @@ export function TunablesTab() {
                         version={params.version}
                         value={String(t.value ?? "")}
                         onCommit={(v) =>
-                          void params.save({ values: { [t.key]: Number(v) } })}
+                          void params.save(
+                            { values: { [t.key]: Number(v) } }, "PUT", { reread: true })}
                       />
                     </div>
                     {modified && (

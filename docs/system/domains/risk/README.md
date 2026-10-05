@@ -87,6 +87,32 @@ placed before the halt can still fill after it. Pulling them needs an EA-side
 command or a broker-order listing keyed to leg ids and a demo session; see
 `_on_grid_leg_cancelled`. Unresolved.
 
+## A goal pause is named as one, in the header and on Telegram (2026-10-05, owner)
+
+The daily goal halts through the same `trade_pause_until` pair as the loss
+guards, so the badge read "Trading Paused until ..." for a good day and a bad
+one alike. `trading_status.halt_label` now reads "Goal Achieved Paused until
+<dd Mon HH:MM>" when the halt reason starts with `GOAL_REASON_PREFIX`
+("Daily goal ", which both `daily_goal` reasons do) and no circuit breaker is
+in force. On a Mac it is derived from the VPS's `detail`, so a VPS on older
+code still reads right.
+
+Telegram alerts while paused come from one place, `risk/pause_message.py`,
+led by that same headline. Before, an out-of-zone signal said "Signal queued
+... Will auto-activate when price returns to zone" and an in-zone one said
+"Auto-execution failed: Trading paused ...", though both rows were left
+`pending` and neither opens while paused. `scan_auto_execute.
+execute_auto_signal` rewords those two exits (and a grid template's refused
+placement) after the fact; nothing about where a signal ends up changed. The
+auto-execute-off and Limit Runner messages use the same headline. The brain
+still files them under "halt" (its rule matches "paused"). Pinned by
+`tests/risk/test_badge_names_a_reached_goal.py` and
+`tests/trading/test_paused_signal_messages_agree.py`.
+
+A manual Limit order is selectable through any pause (frontend gate
+`limitOrderDisabledReason`); a manual Market order is not, because
+`open_trade` refuses it. Whether it should is open: `docs/simon-handover/050`.
+
 ## Open questions
 
 - The Expert Tunables clamp ranges are "documented guesses, flagged for review" — the bounds themselves are unvalidated.

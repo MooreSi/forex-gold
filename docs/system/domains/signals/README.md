@@ -123,3 +123,15 @@ or closes an order**. Bridge use here is read-only (`get_tick`).
 
 - `engine_for_eval` in `scan_messages.py` is named "the one piece of engine coupling this pipeline has left" — visible but not yet removed.
 - `bot_readonly.py` docstring notes a dispatcher rewire deferred to a future pass; `bot_dispatch.py` has since landed, so the docstring is stale rather than contradicted.
+
+## The Signals table reads the trading node (2026-10-05, owner)
+
+On a Mac that trades through the VPS, `GET /api/trading/signals` (Trading >
+Signals and the Dashboard feed) is the VPS's `vantage_signals`, newest 500,
+fetched as peer report `"signals"` (`cluster/peer_reports.py`, same mechanism
+and same no-fallback rule as Fill cost and GEX). The Mac's own table stopped
+being written when it stopped trading, which is why its newest row was
+2026-09-29. Rows carry `node: "remote"`. With the VPS unreachable the route is
+a 503 saying so; a VPS on older code is told to update. Only the VPS's
+dispatcher has to know the report name, so the VPS must be updated for this to
+work. Pinned by `tests/core/test_signals_follow_the_trading_node.py`.

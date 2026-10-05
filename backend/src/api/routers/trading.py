@@ -108,8 +108,14 @@ async def signals(
     real `vantage_signals` columns. Until 2026-09-21 this route had no model at
     all, so every cell but Side and Status was an em dash -- the same gap the
     Positions table had, found the same day.
+
+    The trading node's signals: on a Mac trading through the VPS, the VPS's,
+    and a 503 that says why when it cannot answer.
     """
-    return await trading_ctl.get_signals(eng, status)
+    try:
+        return await trading_ctl.get_signals(eng, status)
+    except trading_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc), status_code=503) from exc
 
 
 @router.get("/signals/{signal_id}")

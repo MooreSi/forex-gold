@@ -56,6 +56,7 @@ import logging
 
 from backend.src.services.risk import governor as _gov
 from backend.src.services.risk import lot_sizing
+from backend.src.services.risk import pause_message
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.utils.news_calendar import check_news_blackout
 import time
@@ -273,8 +274,8 @@ async def handle_limit_order_signal(
         _why = _gov.halt_reason()
         log.warning("[LimitRunner] tg_id=%s not placed — trading paused%s",
                     tg_id, f": {_why}" if _why else "")
-        return {"skip_reason": "Limit order skipped — trading paused"
-                               + (f": {_why}." if _why else ".")}
+        _pause = pause_message.current_pause() or (0.0, _why)
+        return {"skip_reason": pause_message.limit_not_placed(*_pause)}
 
     # The Trading Schedule (windows, per-window and daily profit targets) and
     # the news blackout, the two gates scan_auto_execute.py carries beside the

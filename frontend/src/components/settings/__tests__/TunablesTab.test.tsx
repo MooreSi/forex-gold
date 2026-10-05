@@ -161,3 +161,60 @@ describe("resetting", () => {
     expect(screen.queryByTestId("tunable-reset-min_tp1_rr")).not.toBeInTheDocument();
   });
 });
+
+describe("after a save (owner, 2026-10-05: the screen went blank)", () => {
+  /**
+   * The real PUT answers with `expert_params.set_params`'s return value: a FLAT
+   * `{ key: value }` map, not the grouped catalogue. The tab adopted that as
+   * its data, so every "group" was a number, every row list came out empty,
+   * and the whole section vanished on the first edit -- any tunable, every
+   * time. The fixture above answered every method with the catalogue, which
+   * is why no test saw it.
+   */
+  const FLAT_PUT = { min_tp1_rr: 0.75, max_spread_pts: 60, pending_signal_expiry_s: 120 };
+  const AFTER = {
+    ...CATALOGUE,
+    "Risk filters": CATALOGUE["Risk filters"].map((t) =>
+      t.key === "max_spread_pts" ? { ...t, value: 60 } : t),
+  };
+
+  beforeEach(() => {
+    let saved = false;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (method === "PUT") {
+        saved = true;
+        return { ok: true, status: 200, json: async () => FLAT_PUT };
+      }
+      return { ok: true, status: 200, json: async () => (saved ? AFTER : CATALOGUE) };
+    });
+  });
+
+  it("still shows every tunable", async () => {
+    render(<TunablesTab />);
+    const field = await screen.findByLabelText("Maximum spread");
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "60");
+    await userEvent.tab();
+
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(await screen.findByText("Minimum TP1 reward:risk")).toBeInTheDocument();
+    expect(screen.getByText("Queued signal expiry")).toBeInTheDocument();
+    expect(screen.queryByText("No tunables are registered")).not.toBeInTheDocument();
+  });
+
+  it("shows the value the backend stored", async () => {
+    render(<TunablesTab />);
+    const field = await screen.findByLabelText("Maximum spread");
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "60");
+    await userEvent.tab();
+
+    await waitFor(() => expect(screen.getByLabelText("Maximum spread")).toHaveValue("60"));
+    expect(screen.getByTestId("tunable-max_spread_pts"))
+      .toHaveAttribute("data-modified", "true");
+  });
+});

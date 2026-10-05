@@ -48,6 +48,7 @@ from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.risk import governor as _gov
+from backend.src.services.risk import pause_message as _pause_message
 from backend.src.services.risk import lot_sizing
 from backend.src.utils.news_calendar import check_news_blackout
 from backend.src.utils.models import (
@@ -188,6 +189,7 @@ async def execute_auto_signal(
         get_trading_balance_fn=get_trading_balance_fn,
         open_trade_fn=open_trade_fn,
     )
+    result = await db_module.to_db_thread(_pause_message.reword_result, result)
 
     if facts is not None:
         try:

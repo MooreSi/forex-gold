@@ -15,8 +15,20 @@ export interface SettingsResource<T> {
    * on screen — which reads as a 99% risk setting the engine is not using.
    */
   version: number;
-  save: (body: unknown, method?: "PUT" | "POST") => Promise<void>;
+  save: (body: unknown, method?: "PUT" | "POST", opts?: SaveOptions) => Promise<void>;
   reload: () => Promise<void>;
+}
+
+export interface SaveOptions {
+  /**
+   * Re-read the resource after the write instead of adopting the response.
+   * For an endpoint whose write answers in a different shape from its read:
+   * Expert Tunables reads a grouped catalogue and its PUT answers a flat
+   * `{ key: value }` map. Adopting that blanked the whole tab on every edit
+   * (owner, 2026-10-05). The re-read is still what the backend stored, so the
+   * "show what the engine will use" rule below holds.
+   */
+  reread?: boolean;
 }
 
 /**
@@ -50,14 +62,14 @@ export function useSettingsResource<T>(path: string): SettingsResource<T> {
   }, [reload]);
 
   const save = useCallback(
-    async (body: unknown, method: "PUT" | "POST" = "PUT") => {
+    async (body: unknown, method: "PUT" | "POST" = "PUT", opts?: SaveOptions) => {
       setSaving(true);
       setError(null);
       try {
-        const next = method === "PUT"
+        const answer = method === "PUT"
           ? await api.put<T>(path, body)
           : await api.post<T>(path, body);
-        setData(next);
+        setData(opts?.reread ? await api.get<T>(path) : answer);
         setVersion((v) => v + 1);
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));

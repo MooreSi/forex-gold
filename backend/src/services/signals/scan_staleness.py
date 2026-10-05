@@ -30,6 +30,7 @@ from backend.src.utils.models import STRATEGY_CONSERVATIVE, STRATEGY_SCALE_OUT, 
 from backend.src.services.signals import contradiction as _contradiction
 from backend.src.services.signals import contradiction_log as _contradiction_log
 from backend.src.services.risk import expert_params
+from backend.src.services.risk import pause_message
 from backend.src.services.telegram import alerts
 from backend.src.services.ai import provider
 from backend.src.services.channels import strategy_ai
@@ -231,14 +232,13 @@ async def resolve_strategy_and_skip_reason(
     if market_off_msg:
         skip_reason = market_off_msg + " — signal received but not executed."
     elif await is_trading_paused_fn():
+        # The same words as every other paused alert (risk/pause_message).
         halt_reason = db_module.get_app_config("risk_halt_reason") or "risk halt active"
-        pause_until = db_module.get_app_config("trade_pause_until")
         try:
-            until_str = time.strftime("%H:%M UTC", time.gmtime(float(pause_until)))
-            halt_reason += f", resumes ~{until_str}"
-        except Exception:
-            pass
-        skip_reason = f"⏸️ Trading paused — {halt_reason}."
+            pause_until = float(db_module.get_app_config("trade_pause_until") or 0)
+        except (TypeError, ValueError):
+            pause_until = 0.0
+        skip_reason = pause_message.signal_not_executed(pause_until, halt_reason)
     else:
         skip_reason = "Auto-execution is OFF — activate manually in the dashboard."
 

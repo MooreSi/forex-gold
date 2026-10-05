@@ -726,3 +726,29 @@ take profit when there is one.
   oversized labels on a wide screen and unreadable ones on a phone. Profit per
   month and per week sit side by side (owner, 2026-09-29); the Monthly /
   Weekly switch is on the table only.
+
+## Limit order is outside any pause; Market is not (2026-10-05, owner)
+
+`useTradingController` exports two gates. `orderDisabledReason` (halt reason,
+closed market, tripped breaker, backend unknown) still governs Market order
+and every other control. `limitOrderDisabledReason` (closed market, backend
+unknown only) governs Limit order and "Limit from position" on both tabs,
+because the owner wants manual limit orders to work through a pause and the
+backend already places them through one. Market follows only after
+`docs/simon-handover/050` is answered: the backend refuses it while paused.
+
+## Settings writes that answer in a different shape (2026-10-05)
+
+`useSettingsResource.save` adopts the response by default. Expert Tunables
+reads a grouped catalogue but its PUT answers `expert_params.set_params`'s flat
+`{key: value}` map, so adopting it emptied every group and the tab went blank
+on the first edit of ANY tunable. It now saves with `{ reread: true }`. The
+test fixture had answered every method with the catalogue, which is why it
+went unseen. The other settings PUTs in `routers/settings.py` answer with
+their GET's shape (checked 2026-10-05).
+
+## Signals table on a Mac reads the VPS (2026-10-05, owner)
+
+Rows tagged `node: "remote"` come from the VPS (see the signals domain). Edit
+is disabled on them with the reason (the editor writes this node's database),
+and a 503 from the route is shown as the error instead of "No signals yet".

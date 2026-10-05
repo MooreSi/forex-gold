@@ -43,7 +43,7 @@ export const GLOSSARY: GlossarySection[] = [
       { term: "Market Order", definition: "An order that fills immediately at whatever the current price is." },
       { term: "Limit Order (Pending Order)", definition: "An order that rests unfilled on the broker's book until price reaches a specified level, then fills automatically. Used by the Limit Runner strategy." },
       { term: "GTC \u2014 Good Till Cancelled", definition: "A pending order that stays resting until it either fills or is explicitly cancelled/expires \u2014 as opposed to expiring at the end of the trading day." },
-      { term: "Entry Realignment", definition: "Limit Runner setting: if price has already moved through the signalled zone by the time the order would be placed, enters at market instead and shifts SL/TP by the same distance rather than losing the signal to a broker rejection." },
+      { term: "Entry Realignment", definition: "If price has already left the signalled zone by the time the order would be placed, enters at market instead and shifts SL/TP by the same distance rather than losing the signal. Optionally capped at N pips; past the cap a signal that ran away waits for the zone and one that went through it is discarded." },
     ],
   },
   {

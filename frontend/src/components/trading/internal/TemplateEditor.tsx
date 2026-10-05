@@ -4,17 +4,14 @@ import { Tooltip } from "@/components/shared/Tooltip";
 import { iconFor } from "@/components/shared/icons";
 import { cn } from "@/lib/cn";
 import {
-  FIELD_HINTS, FIELD_GROUPS, FIELD_UNITS, OTHER_GROUP_ID, labelFor,
+  FIELD_GROUPS, HIDDEN_FIELDS, LADDER_FIELD, OTHER_GROUP_ID, labelFor,
 } from "../content/templateGroups";
 import { LadderRrSection } from "./LadderRrSection";
+import { TemplateField, type SchemaField } from "./TemplateField";
+import { TemplateLadderGrid } from "./TemplateLadderGrid";
 import { maxLadderLevel } from "./ladderRr";
 
-export interface SchemaField {
-  name: string;
-  type: string;
-  default: unknown;
-  choices: string[];
-}
+export type { SchemaField };
 
 interface TemplateEditorProps {
   name: string;
@@ -78,79 +75,6 @@ function coerce(field: SchemaField, raw: string | boolean): unknown {
   return field.type === "integer" ? Math.round(n) : n;
 }
 
-function Field({ field, value, onChange, overriddenBy }: {
-  field: SchemaField;
-  value: string | boolean;
-  onChange: (v: string | boolean) => void;
-  /** Why this field sizes nothing right now, when it does not. */
-  overriddenBy?: string;
-}) {
-  const id = `tpl-${field.name}`;
-  const label = labelFor(field.name);
-  const unit = FIELD_UNITS[field.name];
-  const hint = overriddenBy ?? FIELD_HINTS[field.name];
-
-  if (field.type === "boolean") {
-    return (
-      <label className="flex items-start gap-2 py-1">
-        <Tooltip label={hint}>
-          <input
-            id={id}
-            type="checkbox"
-            aria-label={label}
-            checked={Boolean(value)}
-            onChange={(e) => onChange(e.target.checked)}
-            className="mt-0.5 size-3.5 accent-[var(--color-accent)]"
-          />
-        </Tooltip>
-        <span>
-          <span className="text-xs text-ink-1">{label}</span>
-          {hint && <span className="block text-[10px] text-ink-3">{hint}</span>}
-        </span>
-      </label>
-    );
-  }
-
-  return (
-    <div className={cn("py-1", overriddenBy && "opacity-60")} data-overridden={overriddenBy ? "true" : undefined}>
-      <label htmlFor={id} className="block text-[11px] text-ink-2">{label}</label>
-      <div className="mt-0.5 flex items-center gap-1.5">
-        {field.type === "choice" ? (
-          <Tooltip label={hint}>
-            <select
-              id={id}
-              aria-label={label}
-              value={String(value)}
-              onChange={(e) => onChange(e.target.value)}
-              className="w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
-            >
-              {field.choices.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </Tooltip>
-        ) : (
-          <Tooltip label={hint}>
-            <input
-              id={id}
-              aria-label={label}
-              inputMode="decimal"
-              disabled={Boolean(overriddenBy)}
-              value={String(value)}
-              onChange={(e) => onChange(e.target.value)}
-              className="num w-full rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
-            />
-          </Tooltip>
-        )}
-        {unit && (
-          <span data-testid={`unit-${field.name}`} className="shrink-0 text-[10px] text-ink-3">
-            {unit}
-          </span>
-        )}
-      </div>
-      {hint && <p className="mt-0.5 text-[10px] text-ink-3">{hint}</p>}
-    </div>
-  );
-}
-
 export function TemplateEditor({
   name, values, schema, onSave, onClose, sizingOverridden = false,
 }: TemplateEditorProps) {
@@ -160,7 +84,8 @@ export function TemplateEditor({
   const [result, setResult] = useState<string | null>(null);
 
   const groups = useMemo(() => {
-    const byName = new Map(schema.map((f) => [f.name, f]));
+    const byName = new Map(
+      schema.filter((f) => !HIDDEN_FIELDS.has(f.name)).map((f) => [f.name, f]));
     const taken = new Set<string>();
     const out: { id: string; title: string; blurb: string; icon: string;
                  fields: SchemaField[] }[] = [];
@@ -168,7 +93,8 @@ export function TemplateEditor({
     for (const group of FIELD_GROUPS) {
       const names = group.fields
         ? group.fields.filter((n) => byName.has(n))
-        : schema.filter((f) => group.match?.(f.name)).map((f) => f.name);
+        : schema.filter((f) => !HIDDEN_FIELDS.has(f.name) && group.match?.(f.name))
+            .map((f) => f.name);
       const fields = names.map((n) => byName.get(n)!).filter(Boolean);
       fields.forEach((f) => taken.add(f.name));
       if (fields.length) out.push({ ...group, fields });
@@ -176,7 +102,8 @@ export function TemplateEditor({
 
     // Anything no group claimed. This is the rule, not a fallback: a field
     // added to the backend must be editable before anybody edits the groups.
-    const leftovers = schema.filter((f) => !taken.has(f.name));
+    const leftovers = schema.filter(
+      (f) => !taken.has(f.name) && !HIDDEN_FIELDS.has(f.name));
     if (leftovers.length) {
       out.push({
         id: OTHER_GROUP_ID, title: "Other settings", icon: "tunables",
@@ -266,22 +193,44 @@ export function TemplateEditor({
                     {group.title}
                   </h5>
                   <p className="mb-1.5 text-[10px] text-ink-3">{group.blurb}</p>
-                  <div className={cn(
-                    "grid gap-x-4 gap-y-0.5",
-                    "sm:grid-cols-2 lg:grid-cols-3",
-                  )}>
-                    {group.fields.map((field) => (
-                      <Field
-                        key={field.name}
-                        field={field}
-                        value={draft[field.name]}
-                        onChange={(v) => setDraft((d) => ({ ...d, [field.name]: v }))}
-                        overriddenBy={sizingOverridden && SIZING_FIELDS.has(field.name)
-                          ? "Not in use: the EA template override on Trading > Risk sizes every trade."
-                          : undefined}
+                  {RR_LADDERS[group.id] ? (
+                    <>
+                      {/* Anything that is not a level box (the "use the
+                          signal's own targets" switch) sits above the cards,
+                          not inside the four-to-a-row grid. */}
+                      {group.fields.filter((f) => !LADDER_FIELD.test(f.name)).map((field) => (
+                        <TemplateField
+                          key={field.name}
+                          field={field}
+                          value={draft[field.name]}
+                          onChange={(v) => setDraft((d) => ({ ...d, [field.name]: v }))}
+                        />
+                      ))}
+                      <TemplateLadderGrid
+                        prefix={RR_LADDERS[group.id]}
+                        fields={group.fields}
+                        draft={draft}
+                        onChange={(n, v) => setDraft((d) => ({ ...d, [n]: v }))}
                       />
-                    ))}
-                  </div>
+                    </>
+                  ) : (
+                    <div className={cn(
+                      "grid gap-x-4 gap-y-0.5",
+                      "sm:grid-cols-2 lg:grid-cols-3",
+                    )}>
+                      {group.fields.map((field) => (
+                        <TemplateField
+                          key={field.name}
+                          field={field}
+                          value={draft[field.name]}
+                          onChange={(v) => setDraft((d) => ({ ...d, [field.name]: v }))}
+                          overriddenBy={sizingOverridden && SIZING_FIELDS.has(field.name)
+                            ? "Not in use: the EA template override on Trading > Risk sizes every trade."
+                            : undefined}
+                        />
+                      ))}
+                    </div>
+                  )}
                   {RR_LADDERS[group.id] && (
                     <LadderRrSection
                       prefix={RR_LADDERS[group.id]}

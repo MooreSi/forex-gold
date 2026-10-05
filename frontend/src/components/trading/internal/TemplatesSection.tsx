@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { useSettingsResource } from "@/components/settings/hooks/useSettingsResource";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
+import { NewTemplateDialog } from "./NewTemplateDialog";
 import { RenameTemplateDialog } from "./RenameTemplateDialog";
 import { TemplateEditor, type SchemaField } from "./TemplateEditor";
 import { TemplateTransfer } from "./TemplateTransfer";
@@ -50,6 +51,7 @@ export function TemplatesSection({
   const risk = useSettingsResource<Record<string, unknown>>("/api/settings/risk");
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState("");
   const [schema, setSchema] = useState<SchemaField[] | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -86,7 +88,12 @@ export function TemplatesSection({
             ? `EA connected${eaLastSeen != null ? ` — last heard ${Math.round(eaLastSeen)}s ago` : ""}`
             : "No EA connected. Templates still save; they apply on the next signal."}
         </span>
-        <Button variant="ghost" onClick={onInstallBuiltin} className="ml-auto">
+        {/* Offered with nothing selected and with no templates at all: an
+            empty list has nothing else to click. */}
+        <Button onClick={() => setCreating(true)} className="ml-auto">
+          New template
+        </Button>
+        <Button variant="ghost" onClick={onInstallBuiltin}>
           Restore the shipped preset
         </Button>
       </div>
@@ -100,7 +107,7 @@ export function TemplatesSection({
       {templates.length === 0 ? (
         <EmptyState
           title="No EA templates saved"
-          hint="Restore the shipped preset to start from a working one."
+          hint="Create one, or restore the shipped preset to start from a working one."
         />
       ) : (
         <div className="grid min-h-0 gap-3 lg:grid-cols-[16rem_1fr]">
@@ -196,6 +203,18 @@ export function TemplatesSection({
           </Button>
         </div>
       )}
+
+      <NewTemplateDialog
+        open={creating}
+        onOpenChange={setCreating}
+        existing={templates.map((t) => String(t["name"] ?? ""))}
+        onCreate={async (name) => {
+          // Saved with no overrides, so every field is at its default, then
+          // opened for editing. The parent reloads the list after the save.
+          await onSave(name, {});
+          setSelected(name);
+        }}
+      />
 
       {current && (
         <RenameTemplateDialog

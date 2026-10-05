@@ -34,6 +34,8 @@ export interface ReversalReport {
   edge: Record<string, unknown>;
   shadow: unknown;
   history: unknown;
+  /** One row per signal, its result stated once. */
+  ledger?: unknown;
   /** The learning curve, and how far the gate is from training. Guarded on
    *  the backend, so an install with no ML table sends empty objects here
    *  rather than failing the whole report. */

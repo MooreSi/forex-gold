@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Switch } from "@/components/shared/Switch";
 import { cn } from "@/lib/cn";
 import type { ParsingToggle } from "../content/settings";
@@ -9,6 +9,8 @@ interface ParsingToggleCardProps {
   /** Set for a switch that can refuse trades, so on reads as a warning. */
   blocks?: boolean;
   onChange: (on: boolean) => void;
+  /** A control that belongs to this switch (a limit on what it does). */
+  children?: ReactNode;
 }
 
 /** Above this many characters the description starts folded to two lines. */
@@ -22,7 +24,7 @@ const FOLD_AT = 150;
  * in place. A switch whose explanation had to be hunted for is one somebody
  * turns on without reading.
  */
-export function ParsingToggleCard({ toggle, on, blocks, onChange }: ParsingToggleCardProps) {
+export function ParsingToggleCard({ toggle, on, blocks, onChange, children }: ParsingToggleCardProps) {
   const long = toggle.description.length > FOLD_AT;
   const [open, setOpen] = useState(false);
 
@@ -60,6 +62,7 @@ export function ParsingToggleCard({ toggle, on, blocks, onChange }: ParsingToggl
           {open ? "Less" : "More"}
         </button>
       )}
+      {children}
     </div>
   );
 }

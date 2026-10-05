@@ -22,11 +22,11 @@ interface ModelSectionProps {
  * reason is the difference between "give it time" and "it will never fit
  * because the corpus is one-sided".
  */
-function Figure({ label, value, hint, tone }: {
-  label: string; value: string; hint?: string; tone?: string;
+function Figure({ label, value, hint, tone, testId }: {
+  label: string; value: string; hint?: string; tone?: string; testId?: string;
 }) {
   return (
-    <div>
+    <div data-testid={testId}>
       <p className="text-[10px] uppercase tracking-wider text-ink-3">{label}</p>
       <p className={cn("num text-sm font-semibold", tone ?? "text-ink-1")}>{value}</p>
       {hint && <p className="text-[10px] text-ink-3">{hint}</p>}
@@ -47,6 +47,9 @@ function num(value: unknown): number | null {
 export function ModelSection({ model }: ModelSectionProps) {
   const ready = model["ready"] === true;
   const auc = num(model["auc"]);
+  // Trained on the first 60% of time, scored on the last 40%. Reported beside
+  // the blocked-fold AUC, never gated on; absent (not 0.000) when unmeasured.
+  const aucForward = num(model["auc_forward"]);
   const minAuc = num(model["min_auc"]);
   const fittedAt = num(model["fitted_at"]);
   const corpus = asObject(model["corpus"]);
@@ -86,6 +89,15 @@ export function ModelSection({ model }: ModelSectionProps) {
           tone={auc == null ? "text-ink-3"
             : minAuc != null && auc < minAuc ? "text-loss" : "text-profit"}
         />
+        {aucForward != null && (
+          <Figure
+            testId="model-auc-forward"
+            label="AUC, forward in time"
+            value={aucForward.toFixed(3)}
+            hint="first 60% → last 40%"
+            tone="text-ink-1"
+          />
+        )}
         <Figure label="Fitted on" value={num(model["n"]) == null ? "—" : String(num(model["n"]))}
           hint="samples" />
         <Figure label="Labelled corpus" value={labelled ? labelled.toLocaleString("en-GB") : "—"}
@@ -93,6 +105,15 @@ export function ModelSection({ model }: ModelSectionProps) {
         <Figure label="Settled outcomes" value={settled ? settled.toLocaleString("en-GB") : "—"}
           hint={`${num(corpus["pending"]) ?? 0} still open`} />
       </div>
+
+      {/* 0.82 read as "predicts winners". It separates the moments a channel
+          posted from background snapshots, and ranks our own trades' outcomes
+          at AUC 0.496 (measured 2026-10-02). */}
+      <p data-testid="model-auc-meaning" className="text-[10px] text-ink-3">
+        The AUC says how well the model tells the moments a channel posted from
+        background snapshots, scored on whole blocks of time held out. It is
+        not whether a trade wins.
+      </p>
 
       <p className="text-[10px] text-ink-3">
         {fittedAt

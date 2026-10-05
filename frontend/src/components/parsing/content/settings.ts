@@ -90,7 +90,7 @@ export const PARSING_CATEGORIES: ParsingCategory[] = [
       {
         key: "lk_entry_realignment",
         label: "Entry Realignment",
-        description: "Limit Runner only. If the market has already moved through the signalled zone by the time the order would be placed, enters at current market price instead and shifts SL/TP by the same distance \u2014 otherwise the broker rejects a now-invalid limit price and the trade is lost entirely.",
+        description: "If price has already left the signalled zone by the time the order would be placed, enters at current market price instead and shifts SL/TP by the same distance, rather than losing the signal. Applies to market strategies, single and grid EA templates, Limit Runner and queued signals. \u201cRealign up to\u201d caps how far it will chase, whether price ran away from the zone or went through it toward the stop; blank is no limit.",
         defaultOn: false,
       },
       {

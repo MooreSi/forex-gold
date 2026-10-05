@@ -81,8 +81,8 @@ describe("the readout follows the form", () => {
     const user = userEvent.setup();
     renderEditor();
 
-    await user.clear(screen.getByLabelText(/^tp1 pct$/i));
-    await user.type(screen.getByLabelText(/^tp1 pct$/i), "20");
+    await user.clear(screen.getByLabelText(/^tp1 take %$/i));
+    await user.type(screen.getByLabelText(/^tp1 take %$/i), "20");
 
     // 1.0R x 20% + 2.0R x 50% = 1.20R, and 30% is left running.
     expect(screen.getByTestId("rr-summary-tp")).toHaveTextContent("1.20R");

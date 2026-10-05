@@ -3,6 +3,7 @@ import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import { PARSING_CATEGORIES } from "../content/settings";
 import { ParsingToggleCard } from "./ParsingToggleCard";
+import { RealignLimitField } from "./RealignLimitField";
 
 interface ParsingSettingsSectionProps {
   settings: Record<string, unknown>;
@@ -58,7 +59,14 @@ export function ParsingSettingsSection({ settings, onSave }: ParsingSettingsSect
                   on={on(settings, t.key, t.defaultOn)}
                   blocks={category.tone === "warning"}
                   onChange={(v) => void onSave(t.key, v ? 1 : 0)}
-                />
+                >
+                  {t.key === "lk_entry_realignment" && (
+                    <RealignLimitField
+                      value={settings["lk_entry_realignment_max_pips"]}
+                      onSave={(pips) => onSave("lk_entry_realignment_max_pips", pips)}
+                    />
+                  )}
+                </ParsingToggleCard>
               ))}
             </div>
           </section>

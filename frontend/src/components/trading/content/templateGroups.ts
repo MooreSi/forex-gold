@@ -25,6 +25,20 @@ export interface FieldGroup {
 
 export const OTHER_GROUP_ID = "other";
 
+/** A ladder level's box: prefix ("tp" anchor, "tp_pen" pending), level, kind. */
+export const LADDER_FIELD = /^(tp|tp_pen)(\d+)_(pips|pct)$/;
+
+/**
+ * Fields the form does not offer but still carries. Hidden is not deleted: a
+ * save sends every schema field, and an omitted one would reach
+ * `_clean_fields` as "use the default", silently resetting a stored value.
+ *
+ * `grid_legs` is the pre-split field. Pending legs replaced it, and the EA only
+ * reads it when Pending legs is missing, which never happens for a template
+ * saved from here (owner, 2026-10-01: "why it say Grid legs (legacy)?").
+ */
+export const HIDDEN_FIELDS = new Set(["grid_legs"]);
+
 export const FIELD_GROUPS: FieldGroup[] = [
   {
     id: "entry",
@@ -33,7 +47,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
     icon: "positions",
     fields: [
       "mode", "anchor", "anchors", "pendings", "lot_anchor", "lot_pending",
-      "pending_mode", "grid_legs", "grid_step_pts", "gold_half_pip_anchor",
+      "pending_mode", "grid_step_pts", "gold_half_pip_anchor",
       "anc_shave", "cancel_pending", "cancel_pending_level",
       "late_guard_pips", "signal_max_age_sec", "max_spread_pips", "slippage",
       "sig_guard", "sig_guard_pips", "tg_cmd_enabled",
@@ -129,7 +143,6 @@ export const FIELD_LABELS: Record<string, string> = {
   lot_anchor: "Lots per anchor leg",
   lot_pending: "Lots per pending leg",
   pending_mode: "Pending placement",
-  grid_legs: "Grid legs (legacy)",
   grid_step_pts: "Grid step",
   gold_half_pip_anchor: "Half-pip anchor (gold)",
   anc_shave: "Shave the anchor into the zone",
@@ -146,7 +159,9 @@ export const FIELD_LABELS: Record<string, string> = {
   auto_sl: "Set a stop when the signal has none",
   risk_pct: "Risk per trade",
   tpsl_mode: "SL/TP at the broker",
-  signal_rr_ratio: "Target R:R when deriving a TP",
+  // signals/resolution.py SKIPS a signal whose own TP1:SL is below this; it
+  // does not set a target, which is what the old label claimed.
+  signal_rr_ratio: "Skip a signal whose TP1:SL is below",
   safety_cap_pips: "Never risk more than",
   guard_pips: "Guard distance",
   manual_sl_push_pips: "Manual stop nudge",
@@ -221,6 +236,11 @@ export const FIELD_HINTS: Record<string, string> = {
 
 export function labelFor(name: string): string {
   if (FIELD_LABELS[name]) return FIELD_LABELS[name];
+  const ladder = LADDER_FIELD.exec(name);
+  if (ladder) {
+    const [, prefix, n, kind] = ladder;
+    return `${prefix === "tp" ? "TP" : "Pending TP"}${n} ${kind === "pips" ? "pips" : "Take %"}`;
+  }
   // A ladder field, or one added to the backend since this file was written.
   return name.replace(/_/g, " ").replace(/\btp pen\b/, "pending TP");
 }

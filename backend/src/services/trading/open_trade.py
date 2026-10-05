@@ -346,8 +346,8 @@ async def open_trade(
                 # missing (KeyError further down every forwarded call).
                 if _ack.get("error"):
                     raise RuntimeError(f"VPS rejected forwarded trade: {_ack['error']}")
-                _result = dict(_ack.get("result") or {})
-                _result["executed_remotely"] = True
+                _result = dict(_ack.get("result") or {}, executed_remotely=True)
+                await db_module.to_db_thread(signal_state_repo.mark_forwarded_signal_active, signal_id)
                 return _result
             raise ValueError(
                 "Trading stood down — the VPS is the active trader "

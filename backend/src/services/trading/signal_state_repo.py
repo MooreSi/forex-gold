@@ -344,6 +344,23 @@ def fetch_unknown_signals() -> list[dict]:
         ).fetchall()]
 
 
+def mark_forwarded_signal_active(signal_id: str) -> None:
+    """The paired VPS has opened this signal; on this node it is done.
+
+    `open_trade` forwards under centralized signal generation and returns
+    before any local `insert_trade`, the only other thing that moves a signal
+    to `active`. Left `activating`, release_stranded_activations put it back
+    to `pending` 15 minutes later and it was forwarded again (bugs/071 #3).
+    A signal cancelled or expired meanwhile is left as it is.
+    """
+    with db() as conn:
+        conn.execute(
+            "UPDATE vantage_signals SET status='active' "
+            "WHERE signal_id=? AND status IN ('activating','pending')",
+            (signal_id,),
+        )
+
+
 # A claim older than this cannot still be a live open. open_trade's EA ack
 # timeout scales with leg count to a 60s ceiling, so the bound has to clear
 # that comfortably -- releasing a claim that is still in flight would open the

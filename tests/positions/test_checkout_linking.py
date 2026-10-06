@@ -80,9 +80,16 @@ def git(monkeypatch):
     return _install
 
 
+# The real git's path where there is one. Since core_git_exe (2026-10-02) the
+# updater RUNS whatever `which` answers, so a hard-coded "/usr/bin/git" sent
+# TestAgainstRealGit to a file that does not exist on Windows: WinError 2 on
+# every Windows CI run from then on. The fake-subprocess tests never run it.
+_REAL_GIT = upd.shutil.which("git") or "/usr/bin/git"
+
+
 @pytest.fixture
 def git_exists(monkeypatch):
-    monkeypatch.setattr(upd.shutil, "which", lambda _n: "/usr/bin/git")
+    monkeypatch.setattr(upd.shutil, "which", lambda _n: _REAL_GIT)
 
 
 def _index(*pairs) -> str:

@@ -166,6 +166,10 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
     new_signals: list[dict] = []
 
     exclude_high_risk = bool(rs.get("exclude_high_risk", 0))
+    # One read per channel per pass, not per buffered message: this ran up to
+    # 100 times a second on the loop (bugs/030). Lives for this pass only, so
+    # a channel switched off is seen on the next one.
+    _ch_cfg_memo: dict[str, dict | None] = {}
 
     for msg in msgs:
         try:
@@ -188,7 +192,9 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
             channel_name = ctx.tg_reader.get_group_name(group_id) or f"Channel {slot}"
 
             # Resolve channel parser config — auto-bootstrap on first sight
-            ch_cfg = db_module.get_channel_parser_config(channel_name)
+            if channel_name not in _ch_cfg_memo:
+                _ch_cfg_memo[channel_name] = db_module.get_channel_parser_config(channel_name)
+            ch_cfg = _ch_cfg_memo[channel_name]
             if ch_cfg is None:
                 _default_fmt    = 'format_ab' if slot == 1 else 'gd2'
                 _default_prefix = SIGNAL_PREFIX if _default_fmt == 'format_ab' else ''
@@ -199,6 +205,7 @@ async def scan_messages(ctx: ScanCtx) -> list[dict]:
                     f'Auto-configured from slot {slot}',
                 )
                 ch_cfg = db_module.get_channel_parser_config(channel_name) or {}
+                _ch_cfg_memo[channel_name] = ch_cfg
             parser_fmt  = ch_cfg.get('parser_format', 'auto')
             sig_prefix  = ch_cfg.get('signal_prefix') or SIGNAL_PREFIX
 

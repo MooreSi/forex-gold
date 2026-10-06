@@ -1004,29 +1004,27 @@ def _get_history(days: int, flush: bool = False) -> list[dict] | None:
 
 def _get_tick_at(ts: float) -> dict | None:
     """
-    Nearest real bid/ask at or after a historical timestamp — used to compute
-    the actual spread paid on a past trade (copy_ticks_from returns ticks
-    starting at the given time, not before it, which is fine for this purpose
-    since the deal's own fill happened at-or-after this moment).
+    The bid/ask in force at a historical true-UTC moment: the last tick at or
+    before it, else the first after it, within a minute either side. None
+    when the terminal has nothing that close.
+
+    Was copy_ticks_from(<UTC datetime>, 1): server-time convention and no
+    bound on "after", so every TCA reference quote came back on the next
+    whole hour (bugs/052 addendum). Goes through the offset-corrected
+    _get_ticks_range now (mt5_ticks.py).
     """
-    if not _ensure_connected():
+    ticks = _get_ticks_range(float(ts) - 60, float(ts) + 60)
+    if not ticks:
         return None
-    try:
-        from_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
-        ticks = mt5.copy_ticks_from(SYMBOL, from_dt, 1, mt5.COPY_TICKS_ALL)
-        if ticks is None or len(ticks) == 0:
-            return None
-        t = ticks[0]
-        bid, ask = float(t["bid"]), float(t["ask"])
-        spread = round(ask - bid, 5)
-        return {
-            "bid": bid, "ask": ask, "spread": spread,
-            "spread_points": round(spread / 0.01, 1),
-            "time": int(t["time"]),
-        }
-    except Exception as e:
-        log.warning("get_tick_at error: %s", e)
-        return None
+    before = [t for t in ticks if t["time"] <= ts]
+    t = before[-1] if before else ticks[0]
+    bid, ask = float(t["bid"]), float(t["ask"])
+    spread = round(ask - bid, 5)
+    return {
+        "bid": bid, "ask": ask, "spread": spread,
+        "spread_points": round(spread / 0.01, 1),
+        "time": int(t["time"]),
+    }
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────

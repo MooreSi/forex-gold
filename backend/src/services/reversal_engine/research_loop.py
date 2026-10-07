@@ -59,6 +59,12 @@ log = logging.getLogger(__name__)
 
 
 async def reversal_engine_research_loop(engine: Any, is_running: Callable[[], bool]) -> None:
+    from backend.src.services.reversal_engine.evidence.runtime import collector
+    async with collector(engine, is_running):
+        await _research_loop(engine, is_running)
+
+
+async def _research_loop(engine: Any, is_running: Callable[[], bool]) -> None:
     """Once a day at 22:00 Europe/London, read the day's Gold Diggers
     REF + GD2 Telegram messages (text + chart images) and have Claude
     synthesise the real trader's risk-management/entry-logic behaviour

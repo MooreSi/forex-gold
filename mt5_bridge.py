@@ -950,6 +950,8 @@ def _get_history_by_position(position_id: int) -> list[dict] | None:
                 "profit":      d.profit,
                 "swap":        d.swap,
                 "fee":         d.fee,
+                "commission":  getattr(d, "commission", None),
+                "time_msc":    getattr(d, "time_msc", None),
                 "time":        d.time,
                 "comment":     d.comment,
             })
@@ -993,6 +995,8 @@ def _get_history(days: int, flush: bool = False) -> list[dict] | None:
                 "profit":      d.profit,
                 "swap":        d.swap,
                 "fee":         d.fee,
+                "commission":  getattr(d, "commission", None),
+                "time_msc":    getattr(d, "time_msc", None),
                 "time":        d.time,
                 "comment":     d.comment,
             })

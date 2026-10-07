@@ -681,3 +681,10 @@ stages is now one example (latest usable stage), not three. Pinned by
   account-wide halt still covers real orders.
 - The breakout AI reviewer's prompt says `ATR(M5)`; the stored column is
   still called `atr_m15` (legacy name, M5 value, bugs/063).
+
+
+## Reversal broker evidence and feed experiments (2026-10-07)
+
+`services/reversal_engine/evidence/` owns a separate WAL database and background collectors, attached to the research loop lifecycle. Broker labels link tickets plus signal IDs, preserve real initial risk and total partial/runner cashflows, and retain immutable decision features. Separate commission and millisecond deal time are exposed by the bridge history readers; full cashflow labels require a complete position history. Existing order/close bookkeeping and the virtual champion are unchanged. Exact order-submit times are not exposed and remain null; raw broker times retain their server-time basis.
+
+The default free stack uses the existing cached Forex Factory calendar and delayed Yahoo GC=F bars, not actual releases or exchange order-book depth. Optional Trading Economics and Databento collectors require explicit enablement/credentials; optional MLflow REST export has a restart-safe local outbox. Arrival-aware joins exclude revisions received after a decision. Broker candidates and artifact datasets are grouped by policy/environment; insufficient or unmeasured-cost evidence cannot qualify for review, and no candidate auto-promotes. See [collector configuration and limitations](../../../../backend/src/services/reversal_engine/evidence/README.md).

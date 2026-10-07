@@ -1,9 +1,10 @@
+import { Fragment } from "react";
 import { TriangleAlert } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import {
   formatMoney, formatPercent, formatSignedMoney, pnlColour,
 } from "@/components/shared/format";
-import type { BacktestResult } from "@/api/types";
+import type { BacktestResult, StrategyResult } from "@/api/types";
 
 const FILTER_REASONS: [string, string][] = [
   ["out_of_window", "outside the candle window"],
@@ -15,6 +16,30 @@ const FILTER_REASONS: [string, string][] = [
 
 function n(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+/** One half of a split run: its own trade count beside its figures, or the
+ *  reason it has none (fewer than 20 trades, handover 036). */
+function HalfRow({ label, stats, note }: {
+  label: string; stats: StrategyResult | null; note: string;
+}) {
+  return (
+    <tr className="text-[11px] text-ink-3">
+      <td className="py-1 pl-4">{label}</td>
+      {stats ? (
+        <>
+          <td className="num py-1">{stats.trades}</td>
+          <td className="num py-1">{formatPercent(stats.win_rate)}</td>
+          <td className={`num py-1 ${pnlColour(stats.total_pnl)}`}>{formatSignedMoney(stats.total_pnl)}</td>
+          <td className="num py-1">{stats.profit_factor.toFixed(2)}</td>
+          <td className="num py-1">{formatPercent(stats.max_drawdown_pct)}</td>
+          <td className="num py-1">{formatMoney(stats.final_balance)}</td>
+        </>
+      ) : (
+        <td colSpan={6} className="py-1 text-warning">{note}</td>
+      )}
+    </tr>
+  );
 }
 
 /**
@@ -89,17 +114,25 @@ export function BacktestResults({ result }: { result: BacktestResult }) {
                 </td>
               </tr>
             ) : (
-              <tr key={row.strategy} className="border-t border-line">
-                <td className="py-1.5 text-ink-1">{row.strategy}</td>
-                <td className="num py-1.5 text-ink-2">{row.trades}</td>
-                <td className="num py-1.5 text-ink-2">{formatPercent(row.win_rate)}</td>
-                <td className={`num py-1.5 ${pnlColour(row.total_pnl)}`}>
-                  {formatSignedMoney(row.total_pnl)}
-                </td>
-                <td className="num py-1.5 text-ink-2">{row.profit_factor.toFixed(2)}</td>
-                <td className="num py-1.5 text-loss">{formatPercent(row.max_drawdown_pct)}</td>
-                <td className="num py-1.5 text-ink-1">{formatMoney(row.final_balance)}</td>
-              </tr>
+              <Fragment key={row.strategy}>
+                <tr className="border-t border-line">
+                  <td className="py-1.5 text-ink-1">{row.strategy}</td>
+                  <td className="num py-1.5 text-ink-2">{row.trades}</td>
+                  <td className="num py-1.5 text-ink-2">{formatPercent(row.win_rate)}</td>
+                  <td className={`num py-1.5 ${pnlColour(row.total_pnl)}`}>
+                    {formatSignedMoney(row.total_pnl)}
+                  </td>
+                  <td className="num py-1.5 text-ink-2">{row.profit_factor.toFixed(2)}</td>
+                  <td className="num py-1.5 text-loss">{formatPercent(row.max_drawdown_pct)}</td>
+                  <td className="num py-1.5 text-ink-1">{formatMoney(row.final_balance)}</td>
+                </tr>
+                {row.split && (
+                  <>
+                    <HalfRow label="in-sample" stats={row.split.in_sample} note={row.split.in_sample_note} />
+                    <HalfRow label="out-of-sample" stats={row.split.out_of_sample} note={row.split.out_of_sample_note} />
+                  </>
+                )}
+              </Fragment>
             ),
           )}
         </tbody>

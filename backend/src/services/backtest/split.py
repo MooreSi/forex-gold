@@ -24,7 +24,7 @@ the moment a manual signal is added.
 **A side too thin to mean anything reports a note, not a number.** Four trades
 at 75% is not a 75% win rate, it is three wins. Where that line sits is a
 judgment about believability rather than a computation, so it is the owner's:
-`MIN_TRADES_PER_SIDE` is provisional and the open decision is recorded in
+`MIN_TRADES_PER_SIDE` is 20, decided 2026-10-07 and recorded in
 docs/simon-handover/036-how-few-trades-is-too-few.md. This follows the
 precedent already set by `unsupported_reason` -- a row of zeros beside a row
 showing real drawdown reads as an argument FOR the strategy that was never
@@ -41,9 +41,8 @@ from typing import Callable, Optional
 
 from backend.src.services.backtest.engine import BtSignal, StrategyStats
 
-# Provisional. See docs/simon-handover/036-how-few-trades-is-too-few.md --
-# the owner sets this, and until they do it is visible on screen rather than
-# buried here.
+# Owner, 2026-10-07 (docs/simon-handover/036): 20, with the trade count shown
+# beside every figure on the Backtest tab.
 MIN_TRADES_PER_SIDE = 20
 
 _HANDOVER = "docs/simon-handover/036"
@@ -86,7 +85,7 @@ def partition(
 
 def _thin_note(trades: int, min_trades: int) -> str:
     return (f"{trades} trades -- too few to measure "
-            f"(min {min_trades}, provisional; see {_HANDOVER})")
+            f"(min {min_trades}; see {_HANDOVER})")
 
 
 def split_stats(

@@ -231,7 +231,21 @@ export interface StrategyResult {
   final_balance: number;
   equity_curve: number[];
   unsupported_reason: string;
+  /** In-sample / out-of-sample halves when a split was asked for (docs/todo/003). */
+  split?: BacktestSplit | null;
   [key: string]: unknown;
+}
+
+/** Two halves of one strategy's run. A half under the minimum trade count
+ *  (20, handover 036) carries a note instead of numbers. */
+export interface BacktestSplit {
+  boundary_ts: number;
+  requested_frac: number;
+  achieved_frac: number;
+  in_sample: StrategyResult | null;
+  out_of_sample: StrategyResult | null;
+  in_sample_note: string;
+  out_of_sample_note: string;
 }
 
 export interface BacktestResult {

@@ -91,6 +91,21 @@ STOP_BUFFER_ATR = 0.25
 # docs/system/domains/trading/020-set-and-forget.md records it as open.
 MAX_ENTRY_DAILY_ATR = 3.0
 
+# How close to a zone counts as ARRIVED, in 4H ATRs (owner, 2026-10-07: find
+# daily setups). A whole 4H ATR ($30-40 on gold in October) let a BUY 37
+# points above its demand count as "at" it, and the AI then declined it as
+# mid-range. The stop buffer is separate (STOP_BUFFER_ATR) and unchanged.
+ARRIVAL_ATR = 0.5
+# The take-profit when there is NO opposing zone, as a multiple of the risk.
+# 0 refuses the setup, as before. Near an all-time high there is no level
+# above price, so every long was refused for that reason alone; the guide's
+# preferred ratio is 3:1.
+TARGET_FALLBACK_R = 3.0
+# Mark levels on the 4H as well as the Daily and Weekly. The community
+# checklist scores a 4H group; the owner's 2026-09-21 rule kept the 4H to
+# execution only.
+ZONES_FROM_4H = True
+
 # When ATR cannot be read -- a flat or empty series -- the zone tolerance falls
 # back to a tenth of a percent of price, about $2 on gold at $2,000.
 _FALLBACK_TOLERANCE_PCT = 0.001
@@ -154,7 +169,9 @@ def evidence_from(daily: list[dict], entry: list[dict],
                                if daily and price else ([], 0))
     weekly_zones, weekly_bars = (aoi.mark(weekly, price, cluster_width_pct=width)
                                  if weekly and price else ([], 0))
-    zones = aoi.merge(daily_zones + weekly_zones)
+    h4_zones = (aoi.mark(entry, price, cluster_width_pct=width)[0]
+                if ZONES_FROM_4H and entry and price else [])
+    zones = aoi.merge(daily_zones + weekly_zones + h4_zones)
     if len(zones) > aoi.DEFAULT_LIMIT:
         nearest = sorted(zones, key=lambda z: aoi.distance(z, price))
         zones = sorted(nearest[:aoi.DEFAULT_LIMIT], key=lambda z: z["low"])
@@ -339,8 +356,9 @@ def _build(evidence: dict, direction: str,
     zones = aoi.within_width(evidence.get("zones") or [],
                              float(price or 0.0))
     tol = tolerance(evidence)
+    arrival = tol * ARRIVAL_ATR
 
-    here = aoi.at_price(zones, price, want_kind, tolerance=tol)
+    here = aoi.at_price(zones, price, want_kind, tolerance=arrival)
     if here is not None:
         # Price is already at the zone: this is a market entry.
         zone, entry = here, price
@@ -372,12 +390,13 @@ def _build(evidence: dict, direction: str,
 
     stop = _stop_for(direction, zone, evidence, tol)
     target_zone = aoi.next_opposing(zones, entry, direction)
-    if target_zone is None:
+    if target_zone is None and TARGET_FALLBACK_R <= 0:
         return None, ("There is no opposing area of interest to take profit "
                       "at, so the reward cannot be measured and there is no "
                       "way to know whether this clears 1:2. Set & Forget takes "
                       "profit at the next zone, not at a multiple of the risk.")
-    target = target_zone["low"] if direction == "BUY" else target_zone["high"]
+    target = None if target_zone is None else (
+        target_zone["low"] if direction == "BUY" else target_zone["high"])
 
     # ── The three stages ────────────────────────────────────────────────────
     # Rebuilt 2026-09-21. The old model had two -- pick a zone, rest an order
@@ -392,7 +411,7 @@ def _build(evidence: dict, direction: str,
     # visible before it is live. `setup.invalidations` is what makes them
     # unplaceable -- the same mechanism that refuses a thin ratio, so the
     # button is disabled with a reason rather than mysteriously.
-    arrived = _trigger.has_arrived(zone, price, tol)
+    arrived = _trigger.has_arrived(zone, price, arrival)
     fired = _trigger.evaluate(evidence.get("trigger_candles") or [], direction) \
         if arrived else None
     stage = "triggered" if fired else ("waiting" if arrived else "armed")
@@ -402,6 +421,12 @@ def _build(evidence: dict, direction: str,
         # point of waiting for the 30m is that price is already AT the level
         # when it fires, so there is nothing left to rest an order for.
         entry = price
+    if target is None:
+        # No level to aim at (TARGET_FALLBACK_R > 0): a multiple of the risk,
+        # measured from the entry the order will actually have.
+        risk = abs(entry - stop)
+        target = entry + TARGET_FALLBACK_R * risk if direction == "BUY" \
+            else entry - TARGET_FALLBACK_R * risk
 
     candidate = setup.build(
         direction, entry, stop, target,

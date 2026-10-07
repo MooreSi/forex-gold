@@ -38,6 +38,7 @@ afternoon — *then* ask the AI agent to promote it into the main system
 | 001 | Can we replay history accurately offline? | Yes — 85% agreement with the recorded outcomes. Also found that the stored stop-loss column is rewritten after trades — trap for the unwary. |
 | 002 | Is the engine's ML score helping? | **It's backwards.** It scores losing signals *higher* than winners, and the live gate built on it is filtering out winners. The features it learns from are the problem. |
 | 003 | Do the three fixes stack into a winner? | **First positive result.** Require decent reward-vs-risk, skip the bad hours, skip round-number levels, take profit at 1.5× risk: +10R on days the config never saw, while the unfiltered engine lost 20R. Only 28 trades though — promising, not proven. |
+| 004 | Do cleaner labels and simpler ML rescue the newer reversal engine? | **No edge established.** On 3,913 later test signals, both simpler challengers fail. Found reproducible level/feature defects and a mismatch with today's template. [Full review](004-reversal-edge-review/REVIEW.md). |
 
 ## House rules (the agent enforces these — see CLAUDE.md)
 

@@ -83,6 +83,15 @@ anything touches the real system. Python 3.11, pandas/numpy/sklearn, plain
 - The whole dataset is 9 trading days in one strongly-trending gold market.
   Say "on this sample" in every conclusion; re-run when new snapshots land.
 
+## Additional data gotchas from experiment 004 (2026-10-07)
+
+- Current snapshots contain **broker dollars** in executed `re_signals` rows; exclude `live_exec_status='executed'` from virtual R unless actual lot and initial stop/risk are available. The production reader now does this too.
+- `tpl_r` is the replay of the hardcoded old fixed template, not the currently selected dynamic ATR policy; it has no policy hash. Do not claim it validates a newly selected template.
+- Only creation-time vectors are stored. Fill-time score/bias columns do not reconstruct the richer fill-time feature vector.
+- The consolidated ledger mixes virtual and broker outcomes. Stable-reference matching of executed signals is incomplete; never call its raw aggregate an account loss.
+- A snapshot may contain feature values reconstructed after the original decision. Verify publication/availability timestamps before using macro history as point-in-time evidence.
+- `metrics.summarize()` omits initial zero equity when computing drawdown. Experiment 004 preserves the standard table and supplies corrected companion values in its audit JSON; no shared metric implementation was changed.
+
 ## Definition of done, per experiment
 
 1. `python NNN-slug/run.py` exits 0 and reproduces the numbers in its README.

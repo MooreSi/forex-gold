@@ -440,3 +440,14 @@ only, every source.
   target above the latched level releases it; lowering it does not. Before
   this, a later loss (once, the guard's own force-close) re-opened trading.
   **Not yet run on a demo account.**
+
+## Tests that write "today's" closes break at the rollover (2026-10-07)
+
+The broker day starts at 21:00 UTC (`governor.rg_day_start_ts`, fixed UTC+3).
+A test fixture that writes a close at "now minus N seconds" puts it in
+YESTERDAY for N seconds after that, and every daily-goal, give-back and
+breakeven test reads zero realised profit. A full suite crossing 22:00 BST
+failed six of them on 2026-10-07; pinning `time.time()` to a minute past the
+rollover failed about forty. `tests/core/test_giveback_guard._closes` now
+clamps to one second into the day and spaces rows a millisecond apart. A new
+helper that writes today's trades must do the same, or take `day_start=`.

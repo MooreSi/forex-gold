@@ -189,6 +189,16 @@ describe("a day's breakdown", () => {
     expect(split.rows[1]).toMatchObject({ label: "London", pnl: 100, n: 2, wins: 2 });
   });
 
+  it("gives a trade closed 21:00-24:00 UTC its own row, last (bugs/057)", () => {
+    // No session since 2026-10-07. Without its own row it would read as
+    // "no close stamp", which is a different fact.
+    const split = bySession([row({ session: "off", pnl: -15 }), row({ session: "asian", pnl: 4 })]);
+
+    expect(split.rows.map((r) => r.key)).toEqual(["asian", "off"]);
+    expect(split.rows[1]).toMatchObject({ label: "Out of session", pnl: -15 });
+    expect(split.unplaced).toBe(0);
+  });
+
   it("counts a trade with no session rather than bucketing it", () => {
     // A close with no timestamp carries no session. Filing it under whichever
     // session contains hour zero makes a quiet session look busy.

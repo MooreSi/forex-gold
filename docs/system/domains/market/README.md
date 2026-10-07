@@ -94,3 +94,12 @@ them and deliberately did not pre-empt `docs/todo/bugs/057`.
 
 - The liquidity-map level types (`pdh`, `pwl`, `vwap`, `poc`, …) carry a provisional strength of 2 and inherit `score_level`'s 0.50 default for unknown types. Their real weights need the per-type attribution in `reversal_engine/attribution.py` over enough closed trades, and should not be raised before that.
 - `correlation.effective_exposure` assumes an unmeasured pair is perfectly correlated. That is deliberately conservative and it has never been calibrated against this account's actual multi-instrument behaviour, because the account has never held one.
+
+- **The trading sessions have ONE definition** (2026-10-07, bugs/057):
+  `backend/src/utils/sessions.py`. asian 00:00-06:59 UTC, london 07:00-11:59,
+  overlap 12:00-15:59, ny 16:00-20:59, off 21:00-23:59. The Trading Markets
+  gate refuses "off" whatever the buttons say. Do not write another hour
+  mapping: call `session_for_hour`. The weekend is separate
+  (`dpm.engine.is_weekly_market_closed`, `market.sessions.get_session`). The
+  test suite pins the clock (`tools/testing/fixed_clock.py`); a test about
+  the boundaries must drive `detect_session_unpinned`.

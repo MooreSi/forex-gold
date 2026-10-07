@@ -20,7 +20,7 @@ interface TradingMarketsCardProps {
  * already answers.
  */
 const MARKETS: { key: string; label: string; hours: string; Icon: typeof Moon }[] = [
-  { key: "asia", label: "Asia", hours: "21:00–07:00 UTC", Icon: Moon },
+  { key: "asia", label: "Asia", hours: "00:00–07:00 UTC", Icon: Moon },
   { key: "london", label: "London", hours: "07:00–16:00 UTC", Icon: Building2 },
   { key: "new_york", label: "New York", hours: "12:00–21:00 UTC", Icon: MapPin },
 ];
@@ -28,6 +28,8 @@ const MARKETS: { key: string; label: string; hours: string; Icon: typeof Moon }[
 const SESSION_LABEL: Record<string, string> = {
   asian: "Asia", london: "London", overlap: "Overlap (London + NY)",
   ny: "New York", closed: "Markets Closed",
+  // 21:00-24:00 UTC belongs to no session and the gate refuses it (bugs/057).
+  off: "Out of session (21:00–24:00 UTC)",
 };
 
 export function TradingMarketsCard({ markets, onSetMarket }: TradingMarketsCardProps) {

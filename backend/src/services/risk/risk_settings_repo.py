@@ -182,11 +182,14 @@ def _forward_settings_over_sync(updates: dict) -> None:
 def is_session_allowed(rs: Optional[dict] = None) -> tuple[bool, str]:
     """Return (allowed, session_name) based on the user's Trading Markets selection.
 
-    Session mapping:
-      "asian"   → Asia button (21:00–07:00 UTC)
+    Session mapping (utils/sessions, bugs/057, owner 2026-10-07):
+      "asian"   → Asia button (00:00–07:00 UTC)
       "london"  → London button (07:00–12:00 UTC, pre-overlap)
       "overlap" → London OR New York button (12:00–16:00 UTC)
       "ny"      → New York button (16:00–21:00 UTC, post-overlap)
+      "off"     → no button: 21:00–24:00 UTC is refused. Until 2026-10-07 the
+                  Asia button covered it; 29 real trades there since 20 Aug
+                  had netted -$174.
     """
     from backend.src.services.dpm.engine import detect_session, is_weekly_market_closed  # local to avoid circular import
     if is_weekly_market_closed():

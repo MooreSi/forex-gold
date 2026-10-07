@@ -32,10 +32,11 @@ _ATR_LOW          = 15.0
 _ATR_HIGH         = 35.0
 _ATR_DANGER       = 45.0
 
-_OVERLAP_START_UTC = 12
-_OVERLAP_END_UTC   = 16
-_LONDON_START_UTC  = 7
-_ASIAN_END_UTC     = 7
+from backend.src.utils import sessions as _sessions  # noqa: E402  (bugs/057)
+_OVERLAP_START_UTC = _sessions.OVERLAP_START
+_OVERLAP_END_UTC   = _sessions.NY_START
+_LONDON_START_UTC  = _sessions.LONDON_START
+_ASIAN_END_UTC     = _sessions.LONDON_START
 
 # Minimum confidence to fire a Telegram notification on strategy change
 _NOTIFY_CONF_MIN = 0.70

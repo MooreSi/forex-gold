@@ -59,15 +59,8 @@ def _session_at(ts: float) -> str:
     dow, h = dt.weekday(), dt.hour
     if dow == 5 or (dow == 6 and h < 22):
         return "closed"
-    if 23 <= h or h < 8:
-        return "asian"
-    if 8 <= h < 12:
-        return "london"
-    if 12 <= h < 17:
-        return "overlap"
-    if 17 <= h < 21:
-        return "ny"
-    return "off"
+    from backend.src.utils.sessions import session_for_hour
+    return session_for_hour(h)   # the one definition (bugs/057)
 
 
 def _simulate(direction: str, entry: float, sl_dist: float, t0: float,

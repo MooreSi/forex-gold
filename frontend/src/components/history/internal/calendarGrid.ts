@@ -162,7 +162,7 @@ export function bySource(trades: TradeRow[]): (Tally & { source: string })[] {
 /**
  * The trading sessions, in the order a day runs through them.
  *
- * The same four the backend's `_session_for_hour` names and the hourly heat
+ * The same five the backend's `_session_for_hour` names and the hourly heat
  * map reads. Chronological rather than sorted by P&L: this table is read as a
  * day, and "the Asian session gave it all back" is a sentence about order.
  */
@@ -171,6 +171,8 @@ export const SESSIONS: readonly { key: string; label: string }[] = [
   { key: "london", label: "London" },
   { key: "overlap", label: "Overlap (LDN+NY)" },
   { key: "ny", label: "New York" },
+  // 21:00-24:00 UTC, no session since bugs/057 (it used to count as Asian).
+  { key: "off", label: "Out of session" },
 ];
 
 export interface SessionSplit {

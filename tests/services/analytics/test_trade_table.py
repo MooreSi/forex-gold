@@ -383,7 +383,7 @@ class TestWhichSessionATradeClosedIn:
         (9, "london"),
         (14, "overlap"),
         (19, "ny"),
-        (23, "asian"),
+        (23, "off"),        # no session since bugs/057 (was "asian")
     ])
     async def test_the_close_hour_decides_the_session(self, maps, utc_hour,
                                                       session):

@@ -214,10 +214,13 @@ class TestCostsAreChargedOnce:
 
 
 class TestSessionLabelling:
+    # The one definition, utils/sessions (bugs/057, owner 2026-10-07): 07:00
+    # is London, 16:00 is New York, 21:00-23:59 is no session. Was
+    # (7, "asian"), (23, "asian"), (16, "overlap").
     @pytest.mark.parametrize("hour,expected", [
-        (0, "asian"), (7, "asian"), (23, "asian"),
+        (0, "asian"), (6, "asian"), (7, "london"), (23, "off"),
         (8, "london"), (11, "london"),
-        (12, "overlap"), (16, "overlap"),
+        (12, "overlap"), (15, "overlap"), (16, "ny"),
         (17, "ny"), (20, "ny"),
         (21, "off"), (22, "off"),
     ])
@@ -240,4 +243,6 @@ class TestSessionLabelling:
         before = _dt.datetime(2026, 8, 30, 21, 0, tzinfo=_dt.timezone.utc).timestamp()
         after = _dt.datetime(2026, 8, 30, 23, 0, tzinfo=_dt.timezone.utc).timestamp()
         assert bt._session_at(before) == "closed"
-        assert bt._session_at(after) == "asian"
+        # Open, not closed. Its label is "off": 21:00-23:59 is no session
+        # (bugs/057); this was "asian" before.
+        assert bt._session_at(after) == "off"

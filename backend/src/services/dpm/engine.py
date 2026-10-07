@@ -29,6 +29,7 @@ _MAX_BE    = 30.0
 # Session multipliers: wider trail in volatile sessions, tighter in quiet ones
 _SESSION_MULT = {
     "asian":   0.80,
+    "off":     0.80,   # 21-23 UTC: was counted as Asian until bugs/057; same quiet-hours trail
     "london":  1.20,
     "ny":      1.10,
     "overlap": 1.40,   # London/NY crossover — most volatile window
@@ -149,17 +150,11 @@ def compute_adx(candles: list[dict], period: int = 14) -> float:
 
 
 def detect_session() -> str:
-    """Return current session based on UTC hour."""
-    h = datetime.now(timezone.utc).hour
-    london = 7  <= h < 16
-    ny     = 12 <= h < 21
-    if london and ny:
-        return "overlap"
-    if london:
-        return "london"
-    if ny:
-        return "ny"
-    return "asian"
+    """Return current session based on UTC hour: the one definition
+    (utils/sessions, bugs/057). 21:00-23:59 is "off", which the Trading
+    Markets gate refuses."""
+    from backend.src.utils.sessions import session_for_hour
+    return session_for_hour(datetime.now(timezone.utc).hour)
 
 
 def is_weekly_market_closed(now: datetime | None = None) -> bool:

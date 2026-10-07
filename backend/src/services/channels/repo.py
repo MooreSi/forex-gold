@@ -271,7 +271,7 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
         a = agg.setdefault(src, {
             "source": src, "trades": 0, "wins": 0, "losses": 0,
             "net_pnl": 0.0, "win_pts": [], "loss_pts": [], "all_pts": [],
-            "sessions": {"london": 0.0, "ny": 0.0, "overlap": 0.0, "asian": 0.0},
+            "sessions": {"london": 0.0, "ny": 0.0, "overlap": 0.0, "asian": 0.0, "off": 0.0},
         })
         pnl = float(pnl or 0)
         pts = _trade_pts(direction, float(entry or 0), float(close or 0))
@@ -295,7 +295,7 @@ def get_channel_scorecard(days: int = 30) -> list[dict]:
         a = agg.setdefault(src, {
             "source": src, "trades": 0, "wins": 0, "losses": 0,
             "net_pnl": 0.0, "win_pts": [], "loss_pts": [], "all_pts": [],
-            "sessions": {"london": 0.0, "ny": 0.0, "overlap": 0.0, "asian": 0.0},
+            "sessions": {"london": 0.0, "ny": 0.0, "overlap": 0.0, "asian": 0.0, "off": 0.0},
         })
         pnl = float(pnl or 0)
         a["trades"]  += 1

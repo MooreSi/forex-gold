@@ -47,17 +47,8 @@ def pytest_configure(config):
     pinned = _parse(config.getoption("--market-clock"))
     from backend.src.services.dpm import engine as dpm_engine
 
-    hour = pinned.hour
-    london = 7 <= hour < 16
-    ny = 12 <= hour < 21
-    if london and ny:
-        session = "overlap"
-    elif london:
-        session = "london"
-    elif ny:
-        session = "ny"
-    else:
-        session = "asian"
+    from backend.src.utils.sessions import session_for_hour
+    session = session_for_hour(pinned.hour)   # the one definition (bugs/057)
 
     # Recomputed from the pinned instant rather than hardcoded, so a custom
     # --market-clock stays self-consistent.

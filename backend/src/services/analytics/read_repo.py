@@ -27,16 +27,9 @@ from backend.src.services.cluster.sync_repo import _ensure_sync_tables  # noqa: 
 # ── Performance analytics (heat map + channel scorecard) ──────────────────────
 
 def _session_for_hour(h: int) -> str:
-    """Map a UTC hour to a trading session (mirrors dpm_engine.detect_session)."""
-    london = 7 <= h < 16
-    ny     = 12 <= h < 21
-    if london and ny:
-        return "overlap"
-    if london:
-        return "london"
-    if ny:
-        return "ny"
-    return "asian"
+    """Map a UTC hour to a trading session: the one definition (bugs/057)."""
+    from backend.src.utils.sessions import session_for_hour
+    return session_for_hour(h)
 
 
 def _trade_pts(direction: str, entry: float, close: float) -> float:

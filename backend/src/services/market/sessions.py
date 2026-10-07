@@ -16,15 +16,15 @@ that the only live caller, `breakout_signal_velocity`, refuses the Asian
 session unconditionally on the line after it asks — so today this grading
 changes no behaviour either way (bugs/045).
 
-This is one of the four definitions of a trading session in this app; the
-others are in `reversal_engine/level_detector`, `dpm/engine` and
-`channels/strategy_ai`, and they disagree on eight hours of the day. See
-`docs/todo/bugs/057` — reconciling them is an owner decision, not a tidy-up,
-and this move deliberately does not pre-empt it.
+The hour-to-session mapping is `utils/sessions.session_for_hour`, the one
+definition the whole app uses (bugs/057, owner 2026-10-07). This module adds
+only the weekend.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
+
+from backend.src.utils.sessions import session_for_hour
 
 # Frozen from the Bounce engine's stored `allow_asian = 0.0`. See the module
 # docstring: this is a recorded decision now, not a parameter.
@@ -40,15 +40,7 @@ def get_session() -> str:
         return "closed"
     if dow == 6 and h < 22:  # Sunday before Asian open
         return "closed"
-    if 23 <= h or h < 8:
-        return "asian"
-    if 8 <= h < 12:
-        return "london"
-    if 12 <= h < 17:
-        return "overlap"   # London/NY overlap 12-14, then pure NY 14-17
-    if 17 <= h < 21:
-        return "ny"
-    return "off"
+    return session_for_hour(h)   # the one definition (bugs/057)
 
 
 def session_quality(session: str) -> str:

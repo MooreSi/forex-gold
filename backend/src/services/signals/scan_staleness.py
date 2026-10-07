@@ -48,6 +48,7 @@ _SESS_HUMAN = {
     "london": "London Market",
     "overlap": "London & New York Market",
     "ny": "New York Market",
+    "off": "Out-of-Session (21:00-24:00 UTC)",
 }
 
 

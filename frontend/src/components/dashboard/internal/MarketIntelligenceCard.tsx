@@ -16,7 +16,7 @@ interface MarketIntelligenceCardProps {
 /** What the backend calls each session, in the words the Trading tab uses. */
 const SESSION_LABEL: Record<string, string> = {
   asian: "Asia", london: "London", overlap: "London + New York",
-  ny: "New York", closed: "Markets closed",
+  ny: "New York", closed: "Markets closed", off: "Out of session",
 };
 
 /**

@@ -535,15 +535,8 @@ def get_htf_bias(h1_candles: list[dict], h4_candles: Optional[list[dict]] = None
 
 
 def get_session(utc_hour: int) -> str:
-    """Map UTC hour to trading session."""
-    if 0 <= utc_hour < 8:
-        return "asian"
-    if 8 <= utc_hour < 12:
-        return "london"
-    if 12 <= utc_hour < 17:
-        return "overlap"
-    if 17 <= utc_hour < 21:
-        return "ny"
-    return "off"
+    """Map UTC hour to trading session: the one definition (bugs/057)."""
+    from backend.src.utils.sessions import session_for_hour
+    return session_for_hour(utc_hour)
 
 

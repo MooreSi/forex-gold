@@ -37,6 +37,9 @@ def _reset_thread_local_connection():
 _seq = [0]
 
 
+_STEP = 0.001  # seconds between consecutive rows; see _closes
+
+
 def _closes(pnls, day_start=None, at=None):
     """Write closed trades across today, in the order given.
 
@@ -48,19 +51,29 @@ def _closes(pnls, day_start=None, at=None):
     # timestamps would land on the inclusive edge of the window and make the
     # re-arm tests pass or fail on sub-second luck. Post-resume closes pass an
     # explicit later `at`.
+    #
+    # Never before the broker day's start, though: in the two minutes after
+    # the 21:00 UTC rollover, "two minutes ago" is YESTERDAY, the closes fall
+    # outside the window and 18 tests across four files failed (a full run
+    # crossing 22:00 BST, 2026-10-07). One second into the day is still before
+    # any re-arm a test makes at `time.time()`.
+    #
+    # Rows are a millisecond apart, not a second: `_seq` runs across the whole
+    # file, so whole-second steps had walked a hundred-odd seconds past `base`
+    # by the later tests -- past a re-arm made a minute into the broker day.
     if day_start is not None:
         base = day_start + 60
     elif at is not None:
         base = at
     else:
-        base = time.time() - 120
+        base = max(time.time() - 120, rg.rg_day_start_ts() + 1)
     with db.db() as conn:
         for p in pnls:
             i = _seq[0]; _seq[0] += 1
             conn.execute(
                 "INSERT INTO vantage_signals (signal_id, direction, entry_low, entry_high, "
                 "stop_loss, status, created_at) VALUES (?,?,?,?,?,?,?)",
-                (f"s{i}", "BUY", 1.0, 2.0, 0.5, "filled", base + i),
+                (f"s{i}", "BUY", 1.0, 2.0, 0.5, "filled", base + i * _STEP),
             )
             conn.execute(
                 "INSERT INTO vantage_simulated_trades "
@@ -69,7 +82,7 @@ def _closes(pnls, day_start=None, at=None):
                 " close_price, net_pnl) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (f"t{i}", f"s{i}", "BUY", 1.0, 2.0, 1.5, 0.1, 0.0, 0.5, "closed",
-                 base + i, base + i + 1, 1.6, float(p)),
+                 base + i * _STEP, base + (i + 0.5) * _STEP, 1.6, float(p)),
             )
 
 

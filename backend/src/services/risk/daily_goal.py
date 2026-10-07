@@ -26,6 +26,11 @@ It runs from the position monitor cycle instead, at most every
 halts within one sweep, and an entry that arrives inside that window can still
 open. The spec records that limit.
 
+**On MT5's figure** (owner, 2026-10-07): realised P&L is read from MT5's
+closed trades for the goal's window (`broker_realised`), the rows the header
+and the Calendar sum, not the local table, which missed the day's losing
+closes and secured a goal on a day MT5 had at -$41.05.
+
 Not to be confused with Trading > Schedule's daily target
 (`risk/schedule.py`), which is dollars only and applies only while the trading
 schedule is switched on.
@@ -44,7 +49,8 @@ from backend.src.services.risk import settings as _risk
 
 log = logging.getLogger(__name__)
 
-__all__ = ["sweep", "SweepState", "progress", "header_progress", "goal_standing"]
+__all__ = ["sweep", "SweepState", "progress", "header_progress", "goal_standing",
+           "broker_realised"]
 
 # How often the monitor cycle may evaluate the goal. The cycle itself runs
 # every 1-5s; the goal reads the day's closes and, in % mode, the account
@@ -65,8 +71,30 @@ def _window_start() -> float:
     return max(day_start, baseline)
 
 
+def goal_figure(day_realised: float, window_realised: float) -> float:
+    """What the goal counts: realised since its window opened, plus any LOSS
+    made earlier in the broker day.
+
+    A Resume restarts the count of profit (resuming past a reached goal asks
+    for a fresh one) but never wipes out a loss: -$41.05, Resume, +$36.30 is a
+    day at -$4.75, not +$36.30 (owner, 2026-10-07: "it still needs to cover
+    the loss and achieve $26.99").
+    """
+    return round(window_realised + min(day_realised - window_realised, 0.0), 2)
+
+
+def _local_realised() -> tuple[float, float]:
+    """(goal figure, whole day) from the local table."""
+    window, _peak = _gov.day_pnl_and_peak(_window_start())
+    day, _peak = _gov.day_pnl_and_peak(_gov.rg_day_start_ts())
+    return goal_figure(day, window), day
+
+
 def _goal_usd(rs: dict, realised: float, balance: Optional[float]) -> Optional[float]:
-    """The goal in dollars, or None when it cannot be judged or is off."""
+    """The goal in dollars, or None when it cannot be judged or is off.
+
+    `realised` is the WHOLE broker day's: a % goal is of the day's opening
+    balance, which a Resume does not change."""
     if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
         return None
     value = float(rs.get("daily_goal_value", 0) or 0)
@@ -82,10 +110,20 @@ def _goal_usd(rs: dict, realised: float, balance: Optional[float]) -> Optional[f
     return day_open * value / 100.0
 
 
-def check_daily_goal(rs: dict, balance: Optional[float]) -> Optional[str]:
-    """The reason to stop for the day, or None."""
-    realised, _peak = _gov.day_pnl_and_peak(_window_start())
-    goal = _goal_usd(rs, realised, balance)
+def check_daily_goal(rs: dict, balance: Optional[float],
+                     realised: Optional[float] = None,
+                     day_realised: Optional[float] = None) -> Optional[str]:
+    """The reason to stop for the day, or None.
+
+    `realised` is MT5's goal figure (see `broker_realised`) and `day_realised`
+    its whole-day figure; without them the local table is used, which misses
+    closes that reached MT5 by another route (owner, 2026-10-07).
+    """
+    if realised is None:
+        realised, day_realised = _local_realised()
+    if day_realised is None:
+        day_realised = realised
+    goal = _goal_usd(rs, day_realised, balance)
     if goal is None or realised < goal:
         return None
     if str(rs.get("daily_goal_mode") or "pct") == "usd":
@@ -133,6 +171,7 @@ async def header_progress(engine: Any, balance: Optional[float],
 
 
 HOLD_PREFIX = "Daily goal reached"
+SECURED_PREFIX = "Daily goal secured"
 
 
 def _write_halt(reason: str) -> None:
@@ -148,7 +187,9 @@ def _holding() -> bool:
 
 
 def apply_daily_goal(rs: dict, balance: Optional[float],
-                     open_positions: Optional[int] = 0) -> bool:
+                     open_positions: Optional[int] = 0,
+                     realised: Optional[float] = None,
+                     day_realised: Optional[float] = None) -> bool:
     """Stop new entries once the goal is reached. True if it wrote a halt.
 
     The goal is SECURED (halt until the next broker day) only when nothing is
@@ -162,7 +203,7 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
     Leaves another guard's halt alone: whichever guard stopped the day first
     is the one the operator needs to read.
     """
-    reason = check_daily_goal(rs, balance)
+    reason = check_daily_goal(rs, balance, realised, day_realised)
     if not reason:
         return False
     if _gov.is_trading_paused() and not _holding():
@@ -180,7 +221,15 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
     return True
 
 
-def goal_standing(rs: dict, balance: Optional[float]) -> bool:
+def _own_halt() -> bool:
+    """Is the halt in force this goal's, held or secured?"""
+    return _gov.is_trading_paused() and _gov.halt_reason().startswith(
+        (HOLD_PREFIX, SECURED_PREFIX))
+
+
+def goal_standing(rs: dict, balance: Optional[float],
+                  realised: Optional[float] = None,
+                  day_realised: Optional[float] = None) -> bool:
     """Is today's goal reached, or its hold still waiting on open trades?
 
     What `positions/goal_breakeven` protects. The hold counts even after a
@@ -189,22 +238,31 @@ def goal_standing(rs: dict, balance: Optional[float]) -> bool:
     """
     if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
         return False
-    return _holding() or check_daily_goal(rs, balance) is not None
+    return _holding() or check_daily_goal(rs, balance, realised,
+                                          day_realised) is not None
 
 
 def lift_hold(rs: dict, balance: Optional[float],
-              open_positions: Optional[int]) -> bool:
+              open_positions: Optional[int],
+              realised: Optional[float] = None,
+              day_realised: Optional[float] = None) -> bool:
     """The trades the hold waited for closed and took the day under the goal:
     lift it. True if lifted.
+
+    A SECURED halt lifts the same way when MT5's figure (`realised`, required
+    for it) shows the day under the goal: a halt secured on the local table's
+    figure stood all day while MT5 had the day in loss (owner, 2026-10-07).
 
     Only when flat and known flat, only this goal's own hold, and only with a
     balance: while the hold stood, the close-time daily-loss and give-back
     guards saw "already paused" and wrote nothing, so they are re-run here
     exactly as `close_trade` runs them, and the first to fire takes over.
     """
-    if open_positions != 0 or balance is None or not _holding():
+    if open_positions != 0 or balance is None:
         return False
-    if check_daily_goal(rs, balance):
+    if not (_holding() or (realised is not None and _own_halt())):
+        return False
+    if check_daily_goal(rs, balance, realised, day_realised):
         return False
     with db_module.db():
         db_module.set_app_config("trade_pause_until", "0")
@@ -218,6 +276,27 @@ def lift_hold(rs: dict, balance: Optional[float],
     else:
         log.warning("[RG] open trades closed under the daily goal — trading resumes")
     return True
+
+
+async def broker_realised(bridge: Any) -> tuple[bool, Optional[float], Optional[float]]:
+    """(the bridge reports deals, MT5's goal figure, MT5's whole-day figure).
+
+    The goal is profit above the day's starting capital, and MT5 is the record
+    of that (the header's "Today's Goal" reads the same rows). A bridge with no
+    deal history leaves the local table in charge; one that has it but cannot
+    answer gives (True, None, None), and the caller decides nothing that sweep.
+    """
+    if getattr(bridge, "get_deal_history", None) is None:
+        return False, None, None
+    window = await db_module.to_db_thread(_window_start)
+    in_window = await _todays.since(bridge, window)
+    if in_window is None:
+        return True, None, None
+    day_start = _gov.rg_day_start_ts()
+    day = in_window if window <= day_start else await _todays.since(bridge, day_start)
+    if day is None:
+        return True, None, None
+    return True, goal_figure(day, in_window), day
 
 
 async def _open_positions(bridge: Any) -> Optional[int]:
@@ -247,7 +326,12 @@ async def sweep(state: SweepState, bridge: Any, rs: dict,
     try:
         if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
             return
-        holding = await db_module.to_db_thread(_holding)
+        has_deals, realised, day_realised = await broker_realised(bridge)
+        if has_deals and realised is None:
+            # MT5 could not say: no halt, no lift, ask again next sweep. The
+            # local table is not a stand-in -- it is what halted a losing day.
+            return
+        holding = await db_module.to_db_thread(_own_halt if has_deals else _holding)
         balance = None
         if holding or str(rs.get("daily_goal_mode") or "pct") != "usd":
             acc = await bridge.get_account()
@@ -255,9 +339,11 @@ async def sweep(state: SweepState, bridge: Any, rs: dict,
         # All positions on the account, from MT5: the broker is the record of
         # what is open, and counting a manual one only holds for longer.
         open_positions = await _open_positions(bridge)
-        if await db_module.to_db_thread(apply_daily_goal, rs, balance, open_positions):
+        if await db_module.to_db_thread(apply_daily_goal, rs, balance,
+                                        open_positions, realised, day_realised):
             return
         if holding:
-            await db_module.to_db_thread(lift_hold, rs, balance, open_positions)
+            await db_module.to_db_thread(lift_hold, rs, balance, open_positions,
+                                         realised, day_realised)
     except Exception as e:
         log.debug("[DailyGoal] sweep failed: %s", e)

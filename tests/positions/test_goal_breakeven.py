@@ -206,3 +206,51 @@ def test_it_is_throttled(fresh_db, recorded):
     _run(bridge, _rs(), state=state, now=1_000.0 + 1)
 
     assert [m[0] for m in bridge.modified] == [111]
+
+
+# ── on MT5's figure, not the local table (owner, 2026-10-07) ─────────────────
+
+class _DealsBridge(_Bridge):
+    async def get_deal_history(self, days=7):  # pragma: no cover - stubbed
+        raise AssertionError("read through todays_realised")
+
+
+def _mt5_says(monkeypatch, value):
+    from backend.src.services.risk import daily_goal as dg
+
+    async def fake(engine, since_ts):
+        return value
+    monkeypatch.setattr(dg._todays, "since", fake)
+
+
+def test_local_winners_do_not_move_stops_on_a_day_mt5_has_under_the_goal(
+        fresh_db, recorded, monkeypatch):
+    _closes([120])
+    _mt5_says(monkeypatch, -41.05)
+    bridge = _DealsBridge([_pos()])
+
+    _run(bridge, _rs())
+
+    assert bridge.modified == []
+
+
+def test_mt5_at_the_goal_moves_stops_whatever_the_local_table_says(
+        fresh_db, recorded, monkeypatch):
+    """Negative control for the test above."""
+    _closes([-500])
+    _mt5_says(monkeypatch, 120.0)
+    bridge = _DealsBridge([_pos()])
+
+    _run(bridge, _rs())
+
+    assert bridge.modified == [(111, _be(2400.0), None)]
+
+
+def test_no_mt5_figure_moves_nothing(fresh_db, recorded, monkeypatch):
+    _closes([120])
+    _mt5_says(monkeypatch, None)
+    bridge = _DealsBridge([_pos()])
+
+    _run(bridge, _rs())
+
+    assert bridge.modified == []

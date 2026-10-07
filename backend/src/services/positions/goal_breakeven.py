@@ -128,11 +128,16 @@ async def sweep(state: SweepState, bridge: Any, rs: dict,
             return
         if not node_roles.is_active_trader_node():
             return
+        # MT5's figure, as the halt uses (owner, 2026-10-07). No answer, no move.
+        has_deals, realised, day_realised = await _goal.broker_realised(bridge)
+        if has_deals and realised is None:
+            return
         balance = None
         if str(rs.get("daily_goal_mode") or "pct") != "usd":
             acc = await bridge.get_account()
             balance = float((acc or {}).get("balance") or 0) or None
-        if not await db_module.to_db_thread(_goal.goal_standing, rs, balance):
+        if not await db_module.to_db_thread(_goal.goal_standing, rs, balance,
+                                            realised, day_realised):
             return
         open_trades = await db_module.to_db_thread(get_open_trades)
         await _protect(state, bridge, open_trades or [], now)

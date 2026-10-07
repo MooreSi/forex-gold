@@ -369,6 +369,20 @@ only, every source.
   way `close_trade` does, because while the hold stood those guards saw
   "already paused" and wrote nothing. Lifting needs a live balance and only
   ever lifts a reason starting "Daily goal reached", never another guard's.
+- **Measured on MT5's realised figure, not the local table (2026-10-07).**
+  The halt summed `vantage_simulated_trades`, which held only the day's four
+  small winners (+$39.24) while MT5 had the day at -$41.05: the losing closes
+  reached MT5 by another route and never had a local row. It secured a $23.77
+  "goal" on a losing day; the real goal was $26.99 (4% of MT5's opening
+  balance). The header's "Today's Goal" already read MT5. Now the sweep and
+  the breakeven-protect sweep both read `todays_realised.since(bridge,
+  window_start)`, the same closed-trade rows the Calendar sums, from the
+  goal's own window (so Resume still restarts it). MT5 cannot answer: no
+  halt, no lift, no stop moved that sweep; the local table is not a stand-in.
+  A **secured** halt now lifts too when flat and MT5 shows the day under the
+  goal, so a halt written on a wrong figure, or a day a manual order took
+  back under, does not stand all day. A bridge with no `get_deal_history` at
+  all (test fakes) still uses the local table.
 - **`%` is of the day's OPENING balance** (live balance minus today's
   realised), so the same percentage asks for more as the account grows. That
   is the compounding the owner asked for. `$` is a fixed amount.
@@ -382,6 +396,18 @@ only, every source.
 - Resume restarts its window: `rearm_risk_guards` writes
   `daily_goal_baseline_ts` beside the other two baselines. The key is spelled
   out in `governor.py` because `daily_goal` imports `governor`.
+- **A Resume restarts the count of profit, never a loss (2026-10-07, owner).**
+  The day was -$41.05 on MT5, trading was resumed at 09:22, +$36.30 came
+  after, and the goal secured "+$36.30 vs $25.34" while the header read
+  "$26.99 / -$4.75": the morning's loss fell outside the window. The goal now
+  counts `goal_figure(day, window)` = realised since the window opened plus
+  any loss earlier in the broker day; profit before a Resume is still not
+  counted, so resuming past a reached goal still asks for a fresh one. A `%`
+  goal is priced from the whole day's realised (the real opening balance), not
+  the window's. `broker_realised` asks MT5 twice after a Resume (window and
+  day). Pinned by `tests/risk/test_daily_goal_resume_keeps_loss.py`. The
+  header's figure is still the whole day, so after resuming past a reached
+  goal it shows more than the halt counts.
 - **There are now two daily profit targets.** Trading > Schedule's
   `trading_schedule_daily_target` is dollars only, applies only while the
   trading schedule is on, and refuses at the entry gate rather than pausing.

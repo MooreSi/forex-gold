@@ -93,6 +93,21 @@ class TestDiscovery:
 
         assert sorted(ea_deploy.experts_dirs(home=home)) == sorted([a, b, c])
 
+    def test_it_finds_a_portable_terminal_in_a_bottle(self, tmp_path):
+        """Reported 2026-10-07: the owner's Mac runs `terminal64.exe /portable`
+        from `drive_c/Program Files/MetaTrader 5`, so the chart loads its EA
+        from MQL5/Experts INSIDE the install folder. Install only ever wrote to
+        the roaming profile, and the chart stayed on v1.09 after every click."""
+        home = tmp_path / "home"
+        bottle = home / "Library" / "Application Support" / "CrossOver" / "Bottles" / "MetaTrader 5"
+        live = bottle / "drive_c" / "Program Files" / "MetaTrader 5" / "MQL5" / "Experts"
+        demo = bottle / "drive_c" / "Program Files" / "MetaTrader 5 DemoValidation" / "MQL5" / "Experts"
+        x86 = bottle / "drive_c" / "Program Files (x86)" / "Broker MT5" / "MQL5" / "Experts"
+        for d in (live, demo, x86):
+            d.mkdir(parents=True)
+
+        assert sorted(ea_deploy.experts_dirs(home=home)) == sorted([live, demo, x86])
+
     def test_a_machine_with_no_metatrader_finds_nothing(self, tmp_path):
         assert ea_deploy.experts_dirs(home=tmp_path / "home") == []
 

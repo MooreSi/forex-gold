@@ -432,6 +432,17 @@ all in `services/broker/ea_deploy.py` and its callers:
   broker-branded MT5 is elsewhere. Each terminal's data folder holds
   `origin.txt` (UTF-16 with a BOM) naming its install folder; `_metaeditor_for`
   uses that terminal's own `metaeditor64.exe`, falling back to the old path.
+- **A portable terminal's Experts folder was never written (2026-10-07, the
+  owner's Mac).** The live terminal runs `terminal64.exe /portable` from
+  `drive_c/Program Files/MetaTrader 5`, so its chart loads the EA from
+  `MQL5/Experts` inside the install folder. `experts_dirs` globbed only the
+  roaming profile, so Install updated a folder that terminal never reads, F7 in
+  a MetaEditor bound to the roaming profile compiled that copy, and the chart
+  stayed on v1.09 every time. The CrossOver glob now covers
+  `drive_c/Program Files*/*/MQL5/Experts`, and the "press F7" step says to open
+  MetaEditor with F4 from the terminal that has the chart. **Not covered:** a
+  portable terminal under Windows `C:\Program Files` (not under `$HOME`).
+  Pinned by `TestDiscovery::test_it_finds_a_portable_terminal_in_a_bottle`.
 
 Pinned by `tests/services/broker/test_ea_deploy.py` (`TestFindingEachTerminalsMetaEditor`,
 `TestInstallingWhenIdle`), `test_ea_installs_at_startup.py` and

@@ -61,6 +61,12 @@ _HOME_GLOBS = (
     "AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",
     "Library/Application Support/CrossOver/Bottles/*/drive_c/users/*/"
     "AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",
+    # A terminal started with /portable keeps MQL5 inside its install folder,
+    # and THAT is what its chart loads. The owner's Mac runs exactly this
+    # (2026-10-07); with only the roaming glob, Install updated a profile the
+    # running terminal never reads and the chart stayed on the old build.
+    # `Program Files*` covers the (x86) folder too.
+    "Library/Application Support/CrossOver/Bottles/*/drive_c/Program Files*/*/MQL5/Experts",
     # MetaQuotes' own macOS wrapper, which uses its own bundled prefix.
     "Library/Application Support/MetaTrader 5/Bottles/*/drive_c/users/*/"
     "AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",

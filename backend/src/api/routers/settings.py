@@ -327,8 +327,10 @@ async def ea_install() -> dict:
         else:
             detail = "; ".join(r.get("detail", "") for r in failed)
             next_step = (
-                f"Open MetaEditor, open {EA_FILE_NAME} and press F7 to compile "
-                f"it. The chart reloads the new build by itself afterwards. "
+                f"In the MetaTrader window that has the chart, press F4 to open "
+                f"its own MetaEditor (another copy compiles a folder this "
+                f"terminal does not load), open {EA_FILE_NAME} and press F7 to "
+                f"compile it. The chart reloads the new build by itself afterwards. "
                 f"({detail})"
             )
     else:

@@ -180,10 +180,12 @@ class TestPropose:
         assert candidate is not None
         assert candidate["take_profit"] == 2040.0
 
-    def test_no_opposing_zone_produces_no_candidate(self):
+    def test_no_opposing_zone_produces_no_candidate(self, monkeypatch):
         """With nowhere to take profit there is no reward to measure, so there
         is no way to know whether the trade clears 1:2. Inventing a target from
         a multiple of the risk would be inventing the ratio too."""
+        # Pins the rule as it was before 2026-10-07 (test_daily_setups.py has the new one).
+        monkeypatch.setattr(analysis, "TARGET_FALLBACK_R", 0.0)
         candidate, why = analysis.propose(_evidence(
             zones=[_zone("demand", 1975.0, 1985.0)]))
 
@@ -471,10 +473,12 @@ class TestTheAreasOfInterestAreMarkedNotMerged:
     """
 
     @pytest.mark.asyncio
-    async def test_the_levels_come_from_the_higher_timeframes_not_the_4h(self):
+    async def test_the_levels_come_from_the_higher_timeframes_not_the_4h(self, monkeypatch):
         """The 4H is execution. It reacts to the marked levels; it does not
         get to mark its own, or "focuses solely on current price action as it
         interacts with those zones" is not what the page is doing."""
+        # Pins the rule as it was before 2026-10-07 (test_daily_setups.py has the new one).
+        monkeypatch.setattr(analysis, "ZONES_FROM_4H", False)
         engine = _Engine({
             # Validated daily levels at 400 and 600, straddling the price.
             "D1": zigzag([(500.0, 0), (600.0, 8), (400.0, 8), (600.0, 8),
@@ -874,9 +878,11 @@ class TestAWideBandCannotCarryAnEntry:
         assert candidate is None
         assert why
 
-    def test_a_band_wide_enough_to_swallow_price_cannot_be_the_target(self):
+    def test_a_band_wide_enough_to_swallow_price_cannot_be_the_target(self, monkeypatch):
         """A take-profit inside a thousand-point band is a target with a
         thousand points of slack, and the ratio computed from it is fiction."""
+        # Pins the rule as it was before 2026-10-07 (test_daily_setups.py has the new one).
+        monkeypatch.setattr(analysis, "TARGET_FALLBACK_R", 0.0)
         candidate, why = analysis.propose(_evidence(
             price=4350.0, daily_atr=30.0,
             zones=[_zone("demand", 4330.0, 4345.0, touches=3),

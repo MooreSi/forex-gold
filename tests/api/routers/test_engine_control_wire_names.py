@@ -101,9 +101,12 @@ def paired(monkeypatch):
 
 def test_the_real_server_table_is_what_this_test_is_aimed_at(paired):
     """Negative control on the fixture: if the VPS's keys ever change, the
-    tests below would be aimed at a table that no longer exists."""
+    tests below would be aimed at a table that no longer exists.
+
+    CHANGED 2026-10-07 (owner): main dropped "bounce" from `_sub_engines` and
+    added "trend_pa" after this test was written; this is that table."""
     assert set(paired["server"]._sub_engines()) == {
-        "breakout", "bounce", "reversal_engine"}
+        "breakout", "reversal_engine", "trend_pa"}
 
 
 @pytest.mark.parametrize("running,expected", [(True, "start"), (False, "stop")])

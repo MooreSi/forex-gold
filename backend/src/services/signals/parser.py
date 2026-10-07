@@ -202,7 +202,13 @@ def is_format_ab_signal(text: str, prefix: Optional[str] = None) -> bool:
 
 
 def _f(s: str) -> float:
-    return float(str(s).replace(",", "").strip())
+    # A stray trailing full stop ("4284.5. - 4278.5", Gold Diggers Scalping,
+    # 2026-09-14) is read through, owner 2026-10-07 (handover 037, option B).
+    # Anything else that is not a number still raises.
+    t = str(s).replace(",", "").strip()
+    if t.endswith("."):
+        t = t[:-1]
+    return float(t)
 
 
 def parse_instant_entry(text: str) -> Optional[tuple]:

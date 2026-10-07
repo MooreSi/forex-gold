@@ -177,28 +177,36 @@ def test_scans_multiple_messages_and_records_only_the_signals(fresh_db):
 # ── one bad message must not abandon the pass ────────────────────────────
 
 # Verbatim from telegram_messages id=1205040, 'Gold Diggers Scalping',
-# 2026-09-14T15:30:17Z. The entry line carries a typed full stop --
-# "4284.5." -- and _GD2_ENTRY_RANGE_RE's [\d.,]+ captures it, so parser._f
-# raises ValueError on it. Live, that killed every hourly backfill pass from
-# 2026-09-14 15:30 onwards: 15 parseable REF signals in the 72h window and
-# none of them recorded, because the loop's only guard was around the whole
-# of it (docs/todo/bugs/061).
+# 2026-09-14T15:30:17Z: "4284.5." with a typed full stop. Live, it killed every
+# hourly backfill pass from 2026-09-14 15:30 onwards, because the loop's only
+# guard was around the whole of it (docs/todo/bugs/061). Since handover 037
+# (owner, 2026-10-07, option B) the parser reads it as 4284.5.
 TYPO_MSG = ("Buy Gold Now\n\n4284.5. - 4278.5\n\nTP 4287\nTP 4290\nTP 4293\n"
             "TP 4296\nTP open\n\nSL 4274")
 
+# The containment tests below need a message the parser still cannot read:
+# the same signal with a genuinely garbled price.
+GARBLED_MSG = TYPO_MSG.replace("4284.5. -", "4284.5.6 -")
 
-def test_the_typo_message_still_raises_in_the_parser():
+
+def test_the_typo_message_no_longer_raises():
+    """Was `test_the_typo_message_still_raises_in_the_parser`, which pinned the
+    refusal until the owner decided (handover 037, option B). It returns no
+    full signal here for a different reason: this channel's "Buy Gold Now" +
+    plain "TP" layout has no full-signal parser (see bugs/061, 2026-10-07)."""
+    parse_stored_message(TYPO_MSG, "gd2")
+
+
+def test_a_garbled_price_still_raises_in_the_parser():
     """The containment fix below is worth nothing if this stops raising --
-    it would then be testing an empty branch. This pins the input, not the
-    parser: changing _f to accept a trailing full stop is a change to what
-    the LIVE scan can execute and is the owner's call, not this module's."""
+    it would then be testing an empty branch."""
     with pytest.raises(ValueError):
-        parse_stored_message(TYPO_MSG, "gd2")
+        parse_stored_message(GARBLED_MSG, "gd2")
 
 
 def test_a_message_the_parser_chokes_on_does_not_lose_the_others(fresh_db):
     _store_message(ENTRY_MSG, tg_id="1", minutes_ago=50)
-    _store_message(TYPO_MSG, tg_id="2", minutes_ago=40)
+    _store_message(GARBLED_MSG, tg_id="2", minutes_ago=40)
     _store_message(ENTRY_MSG.replace("BUY", "SELL").replace("4021/4015", "4060/4066"),
                    tg_id="3", minutes_ago=30)
 
@@ -213,7 +221,7 @@ def test_a_bad_message_before_every_good_one_still_records_them(fresh_db):
     """Ordering matters: rows come back oldest-first, so a bad message early
     in the window is the worst case -- it is what took the live pass from
     15 recorded to 0."""
-    _store_message(TYPO_MSG, tg_id="1", minutes_ago=60)
+    _store_message(GARBLED_MSG, tg_id="1", minutes_ago=60)
     _store_message(ENTRY_MSG, tg_id="2", minutes_ago=50)
 
     res = backfill_ref_signals(lookback_hours=24)

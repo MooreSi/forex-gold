@@ -123,6 +123,18 @@ async def candles(
     return await eng.get_candles(_mt5_timeframe(timeframe), count)
 
 
+@router.get("/history", response_model=list[Candle])
+async def history(
+    timeframe: str = Query("5m"),
+    before: float = Query(..., gt=0, description="Unix seconds; bars strictly older"),
+    count: int = Query(500, ge=10, le=2000),
+    eng: Any = Depends(engine_dep),
+) -> list[dict]:
+    """Scroll-back (docs/todo/011 phase 2). `/candles` keeps its 1000 cap; the
+    far past comes through here, a page at a time."""
+    return await chart_ctl.get_history(eng, _mt5_timeframe(timeframe), before, count)
+
+
 @router.get("/tick", response_model=TickOut | None)
 async def tick(eng: Any = Depends(engine_dep)) -> dict | None:
     t = await eng.get_tick()

@@ -44,6 +44,14 @@ export const visibleRanges: unknown[] = [];
  */
 export const touchedAfterRemove: string[] = [];
 
+/**
+ * Live visible-logical-range listeners, so a test can pan the chart: call
+ * each with `{ from, to }` in bar indexes. Unsubscribing removes one. Reset it
+ * in `beforeEach`.
+ */
+type RangeHandler = (r: { from: number; to: number } | null) => void;
+export const logicalRangeHandlers: RangeHandler[] = [];
+
 /** Every bar any stubbed candle series was handed through `update()`. */
 export const barUpdates: unknown[] = [];
 
@@ -87,8 +95,15 @@ export function chartStub() {
         timeToCoordinate: () => 120,
         subscribeVisibleTimeRangeChange: alive(() => {}),
         unsubscribeVisibleTimeRangeChange: alive(() => {}),
-        subscribeVisibleLogicalRangeChange: alive(() => {}),
-        unsubscribeVisibleLogicalRangeChange: alive(() => {}),
+        subscribeVisibleLogicalRangeChange: (fn: RangeHandler) => {
+          if (disposed) throw new Error("Object is disposed");
+          logicalRangeHandlers.push(fn);
+        },
+        unsubscribeVisibleLogicalRangeChange: (fn: RangeHandler) => {
+          if (disposed) throw new Error("Object is disposed");
+          const i = logicalRangeHandlers.indexOf(fn);
+          if (i >= 0) logicalRangeHandlers.splice(i, 1);
+        },
         // Bar index <-> pixel: bar 0 at x=100, ten pixels a bar. Not the
         // identity, so a test cannot pass by confusing the two.
         //

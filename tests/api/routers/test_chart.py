@@ -163,6 +163,40 @@ def test_no_chart_endpoint_accepts_a_write(make_client):
         assert client.post(path).status_code == 405, path
 
 
+
+# ── Scroll-back history (docs/todo/011 phase 2) ──────────────────────────────
+
+def test_history_goes_through_the_controller_with_the_mt5_timeframe(
+    make_client, sentinel_engine, monkeypatch,
+):
+    seen = {}
+
+    async def fake(engine, mt5_tf, before, count):
+        seen.update(engine=engine, tf=mt5_tf, before=before, count=count)
+        return _candles(2)
+
+    monkeypatch.setattr(chart_router.chart_ctl, "get_history", fake)
+    rows = make_client().get("/api/chart/history?timeframe=15m&before=5000&count=300").json()
+    assert seen == {"engine": sentinel_engine, "tf": "M15", "before": 5000.0, "count": 300}
+    assert [r["ts"] for r in rows] == [1000.0, 1060.0]
+
+
+def test_history_refuses_an_unknown_timeframe_before_reading(make_client, sentinel_engine):
+    r = make_client().get("/api/chart/history?timeframe=7y&before=5000")
+    assert r.status_code == 400
+    assert sentinel_engine.calls == []
+
+
+def test_history_needs_a_cut_and_bounds_its_count(make_client, sentinel_engine):
+    client = make_client()
+    assert client.get("/api/chart/history?timeframe=5m").status_code in (400, 422)
+    assert client.get("/api/chart/history?timeframe=5m&before=5000&count=5000").status_code in (400, 422)
+    assert sentinel_engine.calls == []
+
+
+def test_history_is_read_only(make_client):
+    assert make_client().post("/api/chart/history").status_code == 405
+
 # ── System reads that belong to no single tab ────────────────────────────────
 
 def test_the_release_list_is_served_with_the_running_version(make_client, monkeypatch):

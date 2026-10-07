@@ -13,6 +13,7 @@ import { ChartOrderActions } from "./internal/ChartOrderActions";
 import { TradingViewChart } from "./internal/TradingViewChart";
 import { useChartView } from "./hooks/useChartView";
 import { useChartDrawings } from "./hooks/useChartDrawings";
+import { useChartHistory } from "./hooks/useChartHistory";
 
 /**
  * Thin wrapper: composition and nothing else. State is in the controller
@@ -33,6 +34,7 @@ export function ChartPanel() {
   const tv = view === "tradingview";
   const candles = asArray<Candle>(c.candles.data);
   const trades = asArray<Trade>(c.trades.data);
+  const history = useChartHistory(c.timeframe, candles);
   // A selected position drawing can become an order (2026-09-28). Only on the
   // Broker chart: its prices are the broker's.
   const selectedPosition = tv ? null : drawings.drawings.find(
@@ -92,6 +94,8 @@ export function ChartPanel() {
             trades={trades}
             timeframeSeconds={TIMEFRAME_SECONDS[c.timeframe]}
             drawings={drawings}
+            history={history.older}
+            onLeftEdge={() => void history.loadOlder()}
           />
         )}
       </PanelShell>

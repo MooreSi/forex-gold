@@ -11,6 +11,7 @@ import { liveBar, type Bar } from "./internal/liveBar";
 import { DrawingLayer } from "./internal/DrawingLayer";
 import { DrawingToolbar } from "./internal/DrawingToolbar";
 import type { ChartDrawings } from "./hooks/useChartDrawings";
+import { EDGE_BARS, mergeHistory } from "./internal/history";
 
 interface CandleChartProps {
   candles: Candle[];
@@ -21,6 +22,11 @@ interface CandleChartProps {
   timeframeSeconds?: number;
   /** The drawings and tools (docs/todo/011). Without them, no drawing layer. */
   drawings?: ChartDrawings;
+  /** Bars older than `candles`, drawn in front of them (docs/todo/011 phase 2).
+   *  Candles only: the EMAs and gaps describe the live window. */
+  history?: Candle[];
+  /** Called when the view is panned to within a few bars of the oldest. */
+  onLeftEdge?: () => void;
 }
 
 // The colours the NiceGUI chart used, kept so the two look like the same app.
@@ -40,7 +46,7 @@ const EMA_COLOURS: Record<string, string> = {
  * every change rather than re-rendering.
  */
 export function CandleChart({
-  candles, overlays, tick, trades, timeframeSeconds, drawings,
+  candles, overlays, tick, trades, timeframeSeconds, drawings, history, onLeftEdge,
 }: CandleChartProps) {
   const holder = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
@@ -63,7 +69,10 @@ export function CandleChart({
     chart: IChartApi; series: ISeriesApi<"Candlestick">;
   } | null>(null);
   const isDisposed = useCallback(() => disposed.current, []);
-  const times = useMemo(() => candles.map((c) => c.ts), [candles]);
+  const bars = useMemo(() => mergeHistory(history ?? [], candles), [history, candles]);
+  const times = useMemo(() => bars.map((c) => c.ts), [bars]);
+  const edge = useRef(onLeftEdge);
+  edge.current = onLeftEdge;
 
   // The document attribute rather than `useTheme()`. This component must be
   // mountable anywhere -- a chart that throws because a context is missing is
@@ -127,14 +136,44 @@ export function CandleChart({
     });
   }, [themeTick]);
 
+  // The first bar drawn last time, so a prepend can keep the view where it was.
+  const firstTs = useRef<number | null>(null);
+
   useEffect(() => {
     if (!candleSeries.current) return;
-    const bars = candles.map((c) => ({
+    const rows = bars.map((c) => ({
       time: c.ts, open: c.open, high: c.high, low: c.low, close: c.close,
     }));
-    candleSeries.current.setData(bars.map((b) => ({ ...b, time: b.time as UTCTimestamp })));
-    lastBar.current = bars[bars.length - 1] ?? null;
-  }, [candles]);
+    // setData keeps the visible range in bar INDEXES, so prepending history
+    // would jump the view back by however many bars arrived. Shift it on by
+    // the same number and the bars under the cursor stay put.
+    const prevFirst = firstTs.current;
+    const added = prevFirst === null ? 0 : rows.findIndex((r) => r.time >= prevFirst);
+    const scale = chart.current?.timeScale();
+    const range = added > 0 && scale && typeof scale.getVisibleLogicalRange === "function"
+      ? scale.getVisibleLogicalRange() : null;
+    candleSeries.current.setData(rows.map((b) => ({ ...b, time: b.time as UTCTimestamp })));
+    if (range && scale) {
+      scale.setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
+    }
+    firstTs.current = rows[0]?.time ?? null;
+    lastBar.current = rows[rows.length - 1] ?? null;
+  }, [bars]);
+
+  // Scroll-back: tell the owner when the view reaches the oldest bars.
+  useEffect(() => {
+    const c = chart.current;
+    if (!c) return;
+    const scale = c.timeScale();
+    const onRange = (r: { from: number; to: number } | null) => {
+      if (r && r.from < EDGE_BARS) edge.current?.();
+    };
+    scale.subscribeVisibleLogicalRangeChange(onRange);
+    return () => {
+      if (disposed.current) return;
+      scale.unsubscribeVisibleLogicalRangeChange(onRange);
+    };
+  }, []);
 
   // The forming candle, moved by each tick between candle refreshes. Defined
   // after the effect above so a refresh's setData lands first.

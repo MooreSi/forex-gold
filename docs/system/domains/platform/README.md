@@ -737,3 +737,26 @@ The path, and why each step is there:
 - Email uses the existing Settings > Email configuration; with none
   configured the Telegram alert and the console entry still happen and the
   log says the email was not sent.
+
+## Reversal has two names, and the wire keeps the old one (2026-09-28)
+
+The engine registry (`services/engines/registry.py`) and the Signal Generator
+tab call Reversal `reversal`. The sync wire has always called it
+`reversal_engine`: `SyncServer._sub_engines()`, the heartbeat's `engines`, the
+stood-down lists, `signal_gen_stats` and the `MSG_ENGINE_CONTROL` comment in
+`sync/protocol.py`. `remote_control._send` forwarded the registry name as it
+was, so every Remote-mode Start/Stop for Reversal from the Mac was acked
+`unknown engine: reversal` and the tab said "The remote node refused". Found
+by reading the code; reproduced by the new test before the fix.
+
+The translation is at the wire boundary, in one table:
+`protocol.ENGINE_WIRE_NAMES`, applied by `protocol.engine_wire_name()` inside
+`SyncClient.send_engine_control`. `remote_control` still hands the client the
+registry name (as `tests/services/cluster/test_remote_control.py` pins). **The
+wire key is not renamed**, because a VPS on an older build knows only
+`reversal_engine`. A name missing from the table goes out unchanged, and a
+peer that does not know it refuses it with nothing started. The ack echoes the
+wire name back; nothing on the Mac reads the ack's `engine`. Pinned end to end
+(router, remote_control, the real client, the real server dispatch and its
+real `_sub_engines` keys) by
+`tests/api/routers/test_engine_control_wire_names.py`.

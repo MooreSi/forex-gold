@@ -129,7 +129,7 @@ def _vector(direction: str, rsi: Optional[float], adx: Optional[float],
         min(float(atr or 8.0) / 20.0, 1.0),
         float(regime if regime is not None else 0.5),
         float(fvg.get("fvg_confluence") or 0.0),
-        float(fvg.get("fvg_dist_norm", 5.0) or 5.0),
+        float(fvg["fvg_dist_norm"] if fvg.get("fvg_dist_norm") is not None else 5.0),
         float(fvg.get("fvg_fresh", 0.5) if fvg.get("fvg_fresh") is not None else 0.5),
         float(fvg.get("fvg_size_norm") or 0.0),
     ]

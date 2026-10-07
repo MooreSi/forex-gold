@@ -357,7 +357,10 @@ def update_live_exec(sig_id: int, mt5_ticket: Optional[int] = None,
 
 def get_ml_training_data() -> list[dict]:
     rows = get_db().all(
-        "SELECT * FROM re_signals WHERE status='closed' AND ml_features_json IS NOT NULL"
+        "SELECT s.*, c.policy_hash AS tpl_policy_hash, c.available_at AS tpl_available_at, "
+        "c.source AS tpl_label_source FROM re_signals s "
+        "LEFT JOIN re_template_label_contracts c ON c.signal_id=s.id "
+        "WHERE s.status='closed' AND s.ml_features_json IS NOT NULL"
     )
     return [dict(r) for r in rows]
 

@@ -159,6 +159,34 @@ def create_schema(get_db: Callable[[], Any]) -> None:
         per_peer_json   TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS re_decision_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signal_ref TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        candidate_rank INTEGER NOT NULL,
+        chosen INTEGER NOT NULL,
+        decision_ts REAL NOT NULL,
+        schema_hash TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        policy_hash TEXT NOT NULL,
+        policy_json TEXT NOT NULL,
+        features_json TEXT,
+        context_json TEXT NOT NULL,
+        predicted_r REAL,
+        health TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS re_decision_signal
+        ON re_decision_snapshots(signal_ref, stage, id);
+
+    CREATE TABLE IF NOT EXISTS re_template_label_contracts (
+        signal_id INTEGER PRIMARY KEY,
+        policy_hash TEXT NOT NULL,
+        policy_json TEXT NOT NULL,
+        cost_pts REAL NOT NULL,
+        available_at REAL NOT NULL,
+        source TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS re_daily_research (
         date                TEXT PRIMARY KEY,
         discipline_score    REAL,

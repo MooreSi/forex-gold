@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
+from dataclasses import asdict
 from typing import Any, Callable, Optional, Sequence
 
 from backend.src.services.reversal_engine import entry_study as es
@@ -109,7 +110,9 @@ async def tpl_label_sweep(engine: Any, bridge: Any = _UNSET,
             unlabelled += 1
             continue
         pairs.append((int(r["id"]), lab))
-    tpl_label_repo.store_tpl(pairs)
+    tpl_label_repo.store_tpl(pairs, contract={
+        "policy": asdict(es.template_policy(COST_PTS)), "cost_pts": COST_PTS,
+        "source": "fixed_template_m1_v1"}, available_at=max(now, time.time()))
     if unlabelled:
         # Bars missing around these triggers; do not ask for this day again.
         _skip_days.add(day)

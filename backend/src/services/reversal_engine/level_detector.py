@@ -57,6 +57,17 @@ def _utc_hour(candle: dict) -> int:
         return 0
 
 
+def _candle_utc(candle: dict) -> Optional[datetime]:
+    raw = candle.get("time", candle.get("ts"))
+    try:
+        if isinstance(raw, str):
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
 def get_asia_range(h1_candles: list[dict]) -> tuple[float, float]:
     """
     Return (asia_low, asia_high) from the most recent complete Asia session
@@ -65,10 +76,23 @@ def get_asia_range(h1_candles: list[dict]) -> tuple[float, float]:
     if not h1_candles:
         return 0.0, 0.0
 
-    # Find the latest Asia session candles
-    asia = [c for c in h1_candles if _utc_hour(c) < 8]
-    if not asia:
+    # Candle OPEN timestamps establish the observed decision boundary, not
+    # wall time: historical replay must never complete a session early.
+    dated = [(c, _candle_utc(c)) for c in h1_candles]
+    dated = [(c, t) for c, t in dated if t is not None]
+    if not dated:
         return 0.0, 0.0
+    asof = max(t for _, t in dated)
+    sessions = {}
+    for candle, ts in dated:
+        if ts.hour < 8:
+            sessions.setdefault(ts.date(), []).append((candle, ts))
+    complete = [d for d, rows in sessions.items()
+                if datetime(d.year, d.month, d.day, 8, tzinfo=timezone.utc) <= asof
+                and {t.hour for _, t in rows} == set(range(8))]
+    if not complete:
+        return 0.0, 0.0
+    asia = [c for c, _ in sessions[max(complete)]]
 
     lows  = [float(c.get("low",  c.get("l", 0))) for c in asia]
     highs = [float(c.get("high", c.get("h", 0))) for c in asia]
@@ -538,5 +562,4 @@ def get_session(utc_hour: int) -> str:
     """Map UTC hour to trading session: the one definition (bugs/057)."""
     from backend.src.utils.sessions import session_for_hour
     return session_for_hour(utc_hour)
-
 

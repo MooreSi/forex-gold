@@ -41,7 +41,8 @@ from typing import Any, Callable, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from backend.src.services.reversal_engine.ml_engine._feature_schema import (
-    FEATURE_NAMES, pad_to_schema)
+    FEATURE_NAMES)
+from backend.src.services.reversal_engine.ml_engine._training_data import stored_vector
 
 log = logging.getLogger("reversal_engine")
 
@@ -147,11 +148,14 @@ def prove(r: Sequence[float], ts: Sequence[float]) -> dict:
     return out
 
 
-def walk_forward(ts_sorted: Sequence[float]) -> list[tuple[list[int], list[int]]]:
+def walk_forward(ts_sorted: Sequence[float],
+                 available_at: Optional[Sequence[float]] = None) -> list[tuple[list[int], list[int]]]:
     """Expanding-window folds over time-sorted rows. Each test block is
     predicted by a model trained only on rows that ended EMBARGO_S before
     the block began."""
     n = len(ts_sorted)
+    if available_at is not None and len(available_at) != n:
+        raise ValueError("one label availability per row required")
     start = int(n * FIRST_TEST_FRAC)
     step = max(1, (n - start) // FOLDS)
     folds = []
@@ -161,7 +165,8 @@ def walk_forward(ts_sorted: Sequence[float]) -> list[tuple[list[int], list[int]]
         if a >= b:
             continue
         cut = ts_sorted[a] - EMBARGO_S
-        train = [i for i in range(a) if ts_sorted[i] < cut]
+        train = [i for i in range(a) if ts_sorted[i] < cut
+                 and (available_at is None or available_at[i] < cut)]
         if len(train) < MIN_ACCEPTED:
             continue
         folds.append((train, list(range(a, b))))
@@ -198,7 +203,8 @@ class EdgeModel:
         ts = [float(r["trigger_time"]) for r in rows]
 
         oos_pred, oos_idx = [], []
-        for train, test in walk_forward(ts):
+        available = [float(r.get("label_available_at", t)) for r, t in zip(rows, ts)]
+        for train, test in walk_forward(ts, available):
             m = self._factory().fit([X[i] for i in train], [y[i] for i in train])
             oos_pred.extend(float(p) for p in m.predict([X[i] for i in test]))
             oos_idx.extend(test)
@@ -225,9 +231,14 @@ class EdgeModel:
         if not features or len(features) != len(FEATURE_NAMES):
             return False, "no feature vector to score", None
         try:
-            pred = float(self._model.predict([_kept(features)])[0])
+            vector = _kept(features)
+            if not all(math.isfinite(v) for v in vector):
+                return False, "features are not finite", None
+            pred = float(self._model.predict([vector])[0])
         except Exception as e:                    # noqa: BLE001
             return False, f"could not score: {e}", None
+        if not math.isfinite(pred):
+            return False, "predicted R is not finite", None
         if pred < 0:
             return False, f"predicted R {pred:+.3f} < 0", pred
         return True, "", pred
@@ -243,13 +254,15 @@ def rows_from_signals(signals: Sequence[dict]) -> list[dict]:
         if s.get("tpl_r") is None or not s.get("trigger_time"):
             continue
         try:
-            feats = pad_to_schema(json.loads(s.get("ml_features_json") or ""))
+            feats = stored_vector(s)
         except (TypeError, ValueError):
             continue
         if not feats:
             continue
         out.append({"features": feats, "tpl_r": float(s["tpl_r"]),
-                    "trigger_time": float(s["trigger_time"])})
+                    "trigger_time": float(s["trigger_time"]),
+                    "label_available_at": float(s.get("tpl_available_at") or
+                                                (float(s["trigger_time"]) + 6*3600))})
     return out
 
 

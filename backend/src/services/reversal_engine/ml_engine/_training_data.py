@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Optional
 
 from ._feature_schema import FEATURE_NAMES, _FEATURE_NEUTRAL, pad_to_schema
@@ -57,12 +58,13 @@ def _realised_r(row: dict) -> Optional[float]:
         return None
     try:
         risk = float(row.get("sl_dist") or 0.0) * _DOLLARS_PER_POINT
-        if risk <= 0:
+        if risk <= 0 or not math.isfinite(risk):
             return None
         net = row.get("net_pnl_dollars")
         if net is None:
             return None
-        return max(-_R_LABEL_CLAMP, min(_R_LABEL_CLAMP, float(net) / risk))
+        value = float(net) / risk
+        return max(-_R_LABEL_CLAMP, min(_R_LABEL_CLAMP, value)) if math.isfinite(value) else None
     except (TypeError, ValueError):
         return None
 
@@ -122,6 +124,13 @@ def stored_vector(row: dict) -> Optional[list]:
     # _FEATURE_NEUTRAL). A vector LONGER than the current schema is
     # from a newer build and still can't be interpreted, so it is
     # still skipped.
+    if not isinstance(f, list):
+        return None
+    try:
+        if not all(math.isfinite(float(v)) for v in f):
+            return None
+    except (TypeError, ValueError):
+        return None
     f = pad_to_schema(f)
     if f is None:
         return None

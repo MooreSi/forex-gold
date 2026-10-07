@@ -31,6 +31,7 @@ default-off toggle before consulting it at all.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -54,6 +55,8 @@ class MetaLabelStatus:
     auc_oos: Optional[float]
     auc_in_sample: Optional[float]
     refusal: str = ""
+    mean_net_r_oos: Optional[float] = None
+    n_accepted_oos: int = 0
 
 
 def label_for(realised_r: Optional[float],
@@ -67,6 +70,8 @@ def label_for(realised_r: Optional[float],
     population this is meant to learn from. See `broker/tca.py`.
     """
     if realised_r is None or cost_r is None:
+        return None
+    if not math.isfinite(float(realised_r)) or not math.isfinite(float(cost_r)):
         return None
     return 1 if float(realised_r) > float(cost_r) else 0
 
@@ -138,11 +143,14 @@ class MetaLabeller:
         for r in rows or ():
             y = label_for(r.get("realised_r"), r.get("cost_r"))
             feats = r.get("features")
-            if y is None or not feats:
+            if y is None or not feats or not all(math.isfinite(float(v)) for v in feats):
                 continue
             usable.append((list(feats), y,
-                           float(r.get("open_time") or 0.0),
-                           float(r.get("close_time") or 0.0)))
+                           float(r.get("decision_time", r.get("open_time")) or 0.0),
+                           float(r.get("label_available_at", r.get("close_time")) or 0.0),
+                           float(r["realised_r"]) - float(r["cost_r"])))
+
+        usable.sort(key=lambda u: u[2])
 
         if len(usable) < self.min_samples:
             self.status = MetaLabelStatus(
@@ -157,11 +165,12 @@ class MetaLabeller:
         spans = [(u[2], u[3]) for u in usable]
         weights = val.uniqueness_weights(spans)
 
-        folds = val.purged_kfold(len(usable), self.folds, spans,
-                                 embargo=self.embargo_s)
+        folds = val.purged_walk_forward(len(usable), self.folds, spans,
+                                       embargo=self.embargo_s)
         oos_scores: list[float] = []
         oos_labels: list[int] = []
         used_folds = 0
+        accepted_net = []
         for train_idx, test_idx in folds:
             if len(train_idx) < 20 or not test_idx:
                 continue
@@ -169,10 +178,11 @@ class MetaLabeller:
                 continue
             model = self._new_model()
             model.fit([X[i] for i in train_idx], [y[i] for i in train_idx],
-                      sample_weight=[weights[i] for i in train_idx])
+                      sample_weight=val.uniqueness_weights([spans[i] for i in train_idx]))
             probs = model.predict_proba([X[i] for i in test_idx])[:, 1]
             oos_scores.extend(float(p) for p in probs)
             oos_labels.extend(y[i] for i in test_idx)
+            accepted_net.extend(usable[i][4] for i, p in zip(test_idx, probs) if p >= 0.5)
             used_folds += 1
 
         auc_oos = auc(oos_scores, oos_labels)
@@ -198,9 +208,18 @@ class MetaLabeller:
                 f"uninformative gate must read the same as no gate")
             return self.status
 
+        mean_net = sum(accepted_net)/len(accepted_net) if accepted_net else None
+        if mean_net is None or mean_net <= 0:
+            self._model = None
+            self.status = MetaLabelStatus(
+                False, len(usable), used_folds, auc_oos, auc_is,
+                "out-of-sample payoff is not positive at p >= 0.5",
+                mean_net, len(accepted_net))
+            return self.status
+
         self._model = final
         self.status = MetaLabelStatus(True, len(usable), used_folds,
-                                      auc_oos, auc_is)
+                                      auc_oos, auc_is, "", mean_net, len(accepted_net))
         log.info("[RE-Engine] meta-labeller armed: n=%d folds=%d AUC(oos)=%.3f",
                  len(usable), used_folds, auc_oos)
         return self.status
@@ -250,9 +269,7 @@ def rows_from_signals(signals: Sequence[dict], xasset: bool = False) -> list[dic
     base features, and a signal the sweep has not measured yet is left out
     rather than given all-neutral peers it never had.
     """
-    import json
-    from backend.src.services.reversal_engine.ml_engine._feature_schema import pad_to_schema
-    from backend.src.services.reversal_engine.ml_engine._training_data import _realised_r
+    from backend.src.services.reversal_engine.ml_engine._training_data import _realised_r, stored_vector
 
     out: list[dict] = []
     for s in signals or ():
@@ -262,7 +279,7 @@ def rows_from_signals(signals: Sequence[dict], xasset: bool = False) -> list[dic
         if not close_time:
             continue
         try:
-            feats = pad_to_schema(json.loads(s.get("ml_features_json") or ""))
+            feats = stored_vector(s)
         except (TypeError, ValueError):
             continue
         if not feats:
@@ -277,6 +294,8 @@ def rows_from_signals(signals: Sequence[dict], xasset: bool = False) -> list[dic
                 continue
             feats = list(feats) + xv
         out.append({"features": feats, "realised_r": r, "cost_r": 0.0,
+                    "decision_time": float(s.get("created_at") or s.get("trigger_time") or 0.0),
+                    "label_available_at": float(close_time),
                     "open_time": float(s.get("trigger_time") or s.get("created_at") or 0.0),
                     "close_time": float(close_time)})
     return out
@@ -314,9 +333,11 @@ def score_signal(sig: dict) -> Optional[float]:
     if not model.status.ready:
         return None
     try:
-        from backend.src.services.reversal_engine import ml_engine as re_ml
-        from backend.src.services.reversal_engine import reversal_engine_repo as re_db
-        feats = re_ml.extract_features(sig, re_db.get_recent_win_rate(20))
+        from backend.src.services.reversal_engine.ml_engine._training_data import stored_vector
+        # This model learns CREATION observations, not a hybrid of old row
+        # fields and current account/REF statistics. Transient enrichment
+        # (RSI, FVG, macro) lives only in this recorded vector.
+        feats = stored_vector(sig)
     except Exception as e:                       # noqa: BLE001
         log.debug("meta-labeller could not build features: %s", e)
         return None

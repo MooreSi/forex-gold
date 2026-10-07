@@ -43,6 +43,7 @@ from backend.src.services.reversal_engine import ml_handover as _ho  # noqa: E40
 # briefly defined in both places during the 2026-09-11 split, which is harmless
 # only until one of them is edited.
 _train_history: list[dict] = []
+_prediction_health: dict = {"status": "untrained", "errors": []}
 
 # REF pattern counters: level_type → {trades, wins, touches}
 #   trades  = correlation matches recorded for this level type (existing semantics)
@@ -503,32 +504,37 @@ def predict(features: list) -> Optional[float]:
     """Return predicted R-multiple or None if not trained.
     Positive = expected profitable, negative = expected losing.
     Blends batch model (60%) + online SGD (40%) when both available."""
-    global _model_online, _model_batch
+    global _prediction_health
     if features is None:
         return None
 
     import numpy as np
     features = _ho.truncate(features)
-    fa = np.array(features, dtype=float).reshape(1, -1)
+    try:
+        fa = np.array(features, dtype=float).reshape(1, -1)
+        if not np.isfinite(fa).all():
+            raise ValueError("non-finite features")
+    except (TypeError, ValueError) as exc:
+        _prediction_health = {"status": "invalid_features", "errors": [str(exc)]}
+        return None
     preds = []
-
-    if _model_batch is not None:
+    errors = []
+    for name, model, weight in [("batch", _model_batch, 0.6), ("online", _model_online, 0.4)]:
+        if model is None:
+            continue
         try:
-            p = float(_model_batch.predict(fa)[0])
-            preds.append((p, 0.6))
-        except Exception:
-            pass
-
-    if _model_online is not None:
-        try:
-            p = float(_model_online.predict(fa)[0])
-            preds.append((p, 0.4))
-        except Exception:
-            pass
+            p = float(model.predict(fa)[0])
+            if not math.isfinite(p):
+                raise ValueError("non-finite predicted R")
+            preds.append((p, weight))
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
 
     if not preds:
+        _prediction_health = {"status": "unavailable", "errors": errors}
         return None
 
+    _prediction_health = {"status": "degraded" if errors else "ok", "errors": errors}
     total_w = sum(w for _, w in preds)
     return round(sum(p * w for p, w in preds) / total_w, 4)
 
@@ -655,6 +661,7 @@ def summary() -> dict:
         "ref_level_stats": _ref_level_stats,
         "features":      FEATURE_NAMES,
         "n_features":    len(FEATURE_NAMES),
+        "prediction_health": dict(_prediction_health),
     }
 
 

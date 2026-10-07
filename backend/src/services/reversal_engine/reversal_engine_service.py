@@ -40,6 +40,7 @@ from backend.src.services.reversal_engine import reversal_engine_repo as re_db
 from backend.src.services.reversal_engine import level_detector as ld
 from backend.src.services.reversal_engine import ml_engine as re_ml
 from backend.src.services.reversal_engine import re_macro
+from backend.src.services.reversal_engine import decision_snapshot as _decisions
 from backend.src.services.reversal_engine import cycle_setup as _setup
 from backend.src.services.risk import capability_gates as _caps
 from backend.src.services.reversal_engine import signal_generator as sg
@@ -475,6 +476,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
 
             sig_id = re_db.create_signal(sig_data)
             if sig_id:
+                _decisions.record_candidates(sig_data, eligible)
                 # Write to shared signal bus
                 try:
                     from backend.src.db import database as _cdb_bus

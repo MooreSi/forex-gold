@@ -147,9 +147,10 @@ class _LiveExecuteMixin:
             # etc.) rather than skipping the gates entirely.
             fresh_prob = sig.get("ml_prob")
             direction  = sig.get("direction")
-            # The fill-time vector for the proven-edge gate. Stays None when
-            # the re-evaluation below cannot run, and that gate refuses None.
+            # Preserve the fresh vector for audit. A failed refresh leaves
+            # it None and the proven-edge gate still refuses the attempt.
             _edge_feats = None
+            _fill_context, _fill_prediction = dict(sig), None
             try:
                 h1_candles  = await self._bridge.get_candles("H1", 50)
                 m15_candles = await self._bridge.get_candles("M15", 80)
@@ -236,6 +237,7 @@ class _LiveExecuteMixin:
                     # originally captured -- those describe the signal itself,
                     # not current conditions.
                     fresh_sig = dict(sig)
+                    _fill_context = fresh_sig
                     fresh_sig["htf_bias"] = fresh_htf
                     fresh_sig["h1_bias"]  = fresh_htf
                     fresh_sig["adx"]      = fresh_adx
@@ -306,6 +308,7 @@ class _LiveExecuteMixin:
                     _edge_feats = fresh_feats
                     if fresh_feats:
                         _fp = re_ml.predict(fresh_feats)
+                        _fill_prediction = _fp
                         if _fp is not None:
                             fresh_prob = _fp
                     re_db.store_ml_prob_at_fill(sig["id"], fresh_prob, fresh_htf)
@@ -314,6 +317,9 @@ class _LiveExecuteMixin:
                     "[RE-Engine] fill-time re-evaluation failed for %s, falling back to "
                     "creation-time ml_prob: %s", sig.get("signal_ref"), _refresh_exc,
                 )
+
+            from backend.src.services.reversal_engine import decision_snapshot
+            decision_snapshot.record_fill(_fill_context, _edge_feats, _fill_prediction)
 
             # Minimum fill delay (reversal-engine/040). Signals reaching
             # their entry within moments of creation lose money consistently;
@@ -374,7 +380,13 @@ class _LiveExecuteMixin:
             # make money on the template's own exits.
             if _caps.require_proven_edge(rs):
                 from backend.src.services.reversal_engine import edge_model
-                _edge_ok, _edge_why, _ = edge_model.decide(_edge_feats)
+                # This proof learns creation vectors. A healthy fill refresh
+                # remains mandatory, but it must not substitute a different
+                # stage's observations into that trained model.
+                _creation_feats = re_ml.stored_vector(sig) if _edge_feats is not None else None
+                if _edge_feats is not None and not sig.get("ml_features_json"):
+                    _creation_feats = _edge_feats  # legacy signals without a recorded vector
+                _edge_ok, _edge_why, _ = edge_model.decide(_creation_feats)
                 if not _edge_ok:
                     re_db.update_live_exec(sig["id"], status="skipped:unproven_edge")
                     _log.info("[RE-Engine] proven-edge gate blocked live exec %s -- %s",

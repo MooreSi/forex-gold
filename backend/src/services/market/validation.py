@@ -89,6 +89,27 @@ def walk_forward_splits(n: int, folds: int) -> list[Split]:
     return out
 
 
+def purged_walk_forward(n: int, folds: int, spans: Sequence[Span],
+                        embargo: float = 0.0) -> list[Split]:
+    """Expanding folds whose training labels were known before decisions.
+
+    Unlike purged k-fold, future observations never enter training. `spans`
+    starts at the observation's decision time and ends when its label is
+    available. Callers sort chronologically before building these spans.
+    """
+    if len(spans) != n or embargo < 0:
+        raise ValueError("one span per row and a nonnegative embargo required")
+    if any(not all(math.isfinite(float(t)) for t in s) or s[1] < s[0] for s in spans):
+        raise ValueError("finite, ordered label spans required")
+    out = []
+    for train, test in walk_forward_splits(n, folds):
+        start = min(spans[i][0] for i in test)
+        train = [i for i in train if spans[i][0] < start
+                 and spans[i][1] < start - embargo]
+        out.append((train, test))
+    return out
+
+
 def expected_max_sharpe(n_trials: int) -> float:
     """The Sharpe you would expect from the BEST of `n_trials` strategies
     that all have no edge at all, assuming unit variance across trials.

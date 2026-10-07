@@ -539,16 +539,8 @@ async def open_trade(
                         # resolve_template_tps, which owns the whole
                         # resolution and is what the DB row is written from
                         # below so the record matches what the EA runs.
-                        _tpl_atr = None
-                        if bool(_ea_template.get("use_dynamic_atr")):
-                            try:
-                                _atr_period = int(_ea_template.get("atr_period") or 14)
-                                _atr_candles = await bridge.get_candles("M5", max(_atr_period + 5, 20))
-                                if _atr_candles:
-                                    from backend.src.services.dpm.engine import compute_atr
-                                    _tpl_atr = compute_atr(_atr_candles, period=_atr_period)
-                            except Exception:
-                                _tpl_atr = None
+                        # Same cached figure the stop was sized from (handover 031).
+                        _tpl_atr = await template_levels.template_atr(_ea_template, bridge)
                         _tps, _ea_pcts, _pen_pips = resolve_template_tps(
                             _ea_template, direction, tick,
                             [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8], tg_source,

@@ -622,12 +622,13 @@ class _LiveExecuteMixin:
             from backend.src.services.trading.open_trade import resolve_template_tps
             from backend.src.services.trading.close_trade import get_trading_balance
             from backend.src.services.trading.fees_sizing import suggest_lot_size
+            _tpl_atr = await _tl.template_atr(_template, self._bridge)   # handover 031
             _tpl_tps, _, _ = resolve_template_tps(
                 _template, direction, _tl.PriceRef(price),
-                [tps.get(n) for n in range(1, 9)], "Reversal Engine")
+                [tps.get(n) for n in range(1, 9)], "Reversal Engine", atr=_tpl_atr)
             if _tpl_tps:
                 tps = {int(k): float(v) for k, v in _tpl_tps.items()}
-            _tpl_sl = _tl.template_sl_at(_template, direction, price)
+            _tpl_sl = _tl.template_sl_at(_template, direction, price, atr=_tpl_atr)
             if _tpl_sl is not None:
                 stop_loss = _tpl_sl
             # Same default resolve_open_trade_params used for this signal.

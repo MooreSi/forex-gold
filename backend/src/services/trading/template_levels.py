@@ -25,6 +25,7 @@ would give a trade a stop measured from one price and targets from another.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
@@ -54,8 +55,49 @@ class PriceRef:
         self.bid = self.ask = self.mid = float(price)
 
 
+# The ATR a dynamic-ATR template's stop and targets are sized from, read from
+# the bridge's M5 bars. It used to come from the DPM M5 cache, which is filled
+# only when `dpm_enabled` (0 on the owner's account), so the stop silently
+# fell back to sl_pips while open_trade's targets read the bridge and scaled
+# (handover 031, 2026-10-07). Cached briefly so one trade's stop, lot and
+# targets are all sized from the same figure.
+_ATR_TTL_S = 30.0
+_atr_cache: dict[int, tuple[float, float]] = {}
+
+
+def reset_atr_cache() -> None:
+    _atr_cache.clear()
+
+
+async def template_atr(template: Optional[dict], bridge: Any) -> Optional[float]:
+    """ATR in price for a template with `use_dynamic_atr`, else None.
+
+    None also when the bridge cannot be read: callers then use `sl_pips`, as
+    they always did without candle data. Never raises."""
+    if not template or not bool(template.get("use_dynamic_atr")) or bridge is None:
+        return None
+    period = int(template.get("atr_period") or 14)
+    hit = _atr_cache.get(period)
+    now = time.monotonic()
+    if hit is not None and now - hit[1] < _ATR_TTL_S:
+        return hit[0]
+    try:
+        candles = await bridge.get_candles("M5", max(period + 5, 20))
+        if not candles:
+            return None
+        from backend.src.services.dpm.engine import compute_atr
+        atr = float(compute_atr(candles, period=period) or 0.0)
+    except Exception as e:                              # noqa: BLE001
+        log.debug("[Template] ATR read failed: %s", e)
+        return None
+    if atr <= 0:
+        return None
+    _atr_cache[period] = (atr, now)
+    return atr
+
+
 def template_sl_at(template: Optional[dict], direction: str, ref_px: float,
-                   dpm_candles: Any = None) -> Optional[float]:
+                   dpm_candles: Any = None, atr: Optional[float] = None) -> Optional[float]:
     """The stop an EA Template puts on a trade entering at `ref_px`, or None.
 
     None means "the template does not state one" -- `sl_pips = 0` is unset, not
@@ -71,10 +113,11 @@ def template_sl_at(template: Optional[dict], direction: str, ref_px: float,
     if not template:
         return None
     dist = None
-    if bool(template.get("use_dynamic_atr")) and dpm_candles:
-        from backend.src.services.dpm.engine import compute_atr
-        atr = compute_atr(dpm_candles, period=int(template.get("atr_period") or 14)) or 0.0
-        if atr > 0:
+    if bool(template.get("use_dynamic_atr")):
+        if not atr and dpm_candles:
+            from backend.src.services.dpm.engine import compute_atr
+            atr = compute_atr(dpm_candles, period=int(template.get("atr_period") or 14)) or 0.0
+        if atr and atr > 0:
             dist = atr * float(template.get("atr_sl_mult") or 1.5)
     if dist is None:
         pips = float(template.get("sl_pips") or 0)

@@ -341,22 +341,24 @@ async def handle_limit_order_signal(
     # points, which would have put a 60-pip BUY stop at 4422.74 -- above its
     # own entry.
     #
-    # No candles reach this path, so `use_dynamic_atr` has no ATR to use and
-    # falls back to sl_pips, which template_sl_at handles. Worth knowing
-    # rather than worth plumbing candles here: an ATR read at placement time
-    # describes a market the order will not fill in anyway.
+    # `use_dynamic_atr`: the ATR at placement, read from the bridge
+    # (template_levels.template_atr). It describes the market now, not at the
+    # fill, but leaving it out meant a dynamic-ATR template ran a fixed stop
+    # on this route and an ATR stop on the market route (handover 031,
+    # 2026-10-07). No bridge, or no candles: sl_pips, as before.
     _template = _template_for_channel(channel_name)
     if _template is not None:
+        _tpl_atr = await _template_levels.template_atr(_template, bridge)
         _tpl_tps, _, _ = resolve_template_tps(
             _template, direction, _template_levels.PriceRef(price),
             [parsed.get(f"tp{i}") for i in range(1, MAX_TP + 1)],
-            channel_name,
+            channel_name, atr=_tpl_atr,
         )
         if _tpl_tps:
             tps = {int(k): float(v) for k, v in _tpl_tps.items()}
         # sl_pips = 0 is unset, not an instruction to invent a stop -- the
         # signal's own then stands, unchanged from resolution.py.
-        _tpl_sl = _template_levels.template_sl_at(_template, direction, price)
+        _tpl_sl = _template_levels.template_sl_at(_template, direction, price, atr=_tpl_atr)
         if _tpl_sl is not None:
             stop_loss = _tpl_sl
 

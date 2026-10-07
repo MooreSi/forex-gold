@@ -383,12 +383,17 @@ async def process_instant_entry(
         # in this function already measures from entry_px and a template
         # fires at market, so the two are effectively the same reference.
         _tpl_sl_dist = None
-        if bool(_template_ime.get("use_dynamic_atr")) and dpm_candles:
-            try:
-                _tpl_atr_ime = dpm_engine.compute_atr(
-                    dpm_candles, period=int(_template_ime.get("atr_period") or 14)) or 0.0
-            except Exception:
-                _tpl_atr_ime = 0.0
+        if bool(_template_ime.get("use_dynamic_atr")):
+            # The bridge's M5 first, as every other route (handover 031): the
+            # DPM cache below is empty unless dpm_enabled.
+            from backend.src.services.trading import template_levels as _tl_ime
+            _tpl_atr_ime = await _tl_ime.template_atr(_template_ime, bridge) or 0.0
+            if not _tpl_atr_ime and dpm_candles:
+                try:
+                    _tpl_atr_ime = dpm_engine.compute_atr(
+                        dpm_candles, period=int(_template_ime.get("atr_period") or 14)) or 0.0
+                except Exception:
+                    _tpl_atr_ime = 0.0
             if _tpl_atr_ime > 0:
                 _tpl_sl_dist = _tpl_atr_ime * float(_template_ime.get("atr_sl_mult") or 1.5)
         if _tpl_sl_dist is None:

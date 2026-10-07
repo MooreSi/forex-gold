@@ -38,6 +38,7 @@ from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
 from backend.src.services.trading.template_levels import template_sl_at as _template_sl_at
+from backend.src.services.trading.template_levels import template_atr as _template_atr
 from backend.src.services.risk.schedule import (
     check_trading_schedule, effective_channel_strategy, schedule_source_key,
 )
@@ -505,7 +506,11 @@ async def resolve_open_trade_params(
         # (owner, 2026-09-29: 0.02 to 0.07 lots at one Risk %). Same rule as
         # instant entry and the Reversal Engine's limit orders.
         _size_ref = tick.ask if _dir == "BUY" else tick.bid
-        _size_sl = _template_sl_at(_template, _dir, _size_ref, dpm_candles)
+        # Read from the bridge, not the DPM cache, which is empty unless
+        # dpm_enabled (handover 031): the stop, the lot and open_trade's
+        # targets all come from this one ATR.
+        _tpl_atr = await _template_atr(_template, bridge)
+        _size_sl = _template_sl_at(_template, _dir, _size_ref, dpm_candles, atr=_tpl_atr)
         if _size_sl is None:
             _size_ref, _size_sl = entry_mid, float(sig["stop_loss"])
         lot_size  = lot_sizing.template_lot(
@@ -577,7 +582,8 @@ async def resolve_open_trade_params(
         # the tick is. This call is the market path and passes the tick, which
         # is exactly what it always did.
         _tpl_sl = _template_sl_at(
-            _template, _dir, tick.ask if _dir == "BUY" else tick.bid, dpm_candles)
+            _template, _dir, tick.ask if _dir == "BUY" else tick.bid, dpm_candles,
+            atr=await _template_atr(_template, bridge))
         if _tpl_sl is not None:
             stop_loss_to_use = _tpl_sl
     elif strategy == STRATEGY_NO_SL_SCALE:

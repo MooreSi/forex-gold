@@ -5,6 +5,7 @@ import {
   usePlaceOrderDialogController, type MarketOrderPrefill,
 } from "./hooks/usePlaceOrderDialogController";
 import { OrderForm } from "./internal/OrderForm";
+import { managementSentence, type StrategyChoice } from "./internal/orderStrategy";
 
 interface PlaceOrderDialogProps {
   open: boolean;
@@ -15,6 +16,8 @@ interface PlaceOrderDialogProps {
   /** Filled in from a position drawn on the chart. Read when the dialog is
    *  mounted; the caller mounts a fresh one per position. */
   prefill?: MarketOrderPrefill | null;
+  /** What the Strategy choice offers besides blank (a single take profit). */
+  strategies?: StrategyChoice[];
 }
 
 /**
@@ -26,7 +29,7 @@ interface PlaceOrderDialogProps {
  * verbatim.
  */
 export function PlaceOrderDialog({
-  open, onOpenChange, onPlaced, disabledReason, prefill,
+  open, onOpenChange, onPlaced, disabledReason, prefill, strategies = [],
 }: PlaceOrderDialogProps) {
   const c = usePlaceOrderDialogController(onPlaced, prefill);
 
@@ -73,10 +76,13 @@ export function PlaceOrderDialog({
       }
     >
       {c.step === "form" ? (
-        <OrderForm controller={c} />
+        <OrderForm controller={c} strategies={strategies} />
       ) : (
         <div className="space-y-3">
           <p data-testid="order-summary" className="text-sm text-ink-1">{c.summary}</p>
+          <p data-testid="order-management" className="text-xs text-ink-2">
+            {managementSentence(c.strategy, strategies)}
+          </p>
           <p className="text-xs text-ink-3">
             The backend decides whether this order is allowed and at what size. If it refuses,
             the reason appears below.

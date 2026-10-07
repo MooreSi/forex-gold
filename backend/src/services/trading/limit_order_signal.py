@@ -176,6 +176,17 @@ def _resolve_management(
             None,
         )
 
+    return management_shape(override, n, tp_open, params)
+
+
+def management_shape(
+    strategy: str, n: int, tp_open: bool, params: dict,
+) -> tuple[str, list[float], int, str | None]:
+    """(strategy, pcts, be_at_pos, trail_mode) for a non-template strategy
+    managing a resting order's fill. Shared with the Limit Order dialog
+    (manual_limit_order), so the two routes cannot shape one strategy two
+    ways."""
+    override = strategy
     from backend.src.services.trading.open_trade import (
         _EA_LADDER_PCTS, _EA_LADDER_BE_AT_POS, _EA_LADDER_TRAIL_MODE,
     )

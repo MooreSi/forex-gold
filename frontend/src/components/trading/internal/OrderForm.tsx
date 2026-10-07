@@ -1,6 +1,8 @@
 import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import type { usePlaceOrderDialogController } from "../hooks/usePlaceOrderDialogController";
+import { OrderStrategyField } from "./OrderStrategyField";
+import type { StrategyChoice } from "./orderStrategy";
 
 type Controller = ReturnType<typeof usePlaceOrderDialogController>;
 
@@ -32,7 +34,9 @@ function Field({
   );
 }
 
-export function OrderForm({ controller: c }: { controller: Controller }) {
+export function OrderForm({
+  controller: c, strategies = [],
+}: { controller: Controller; strategies?: StrategyChoice[] }) {
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
@@ -70,8 +74,16 @@ export function OrderForm({ controller: c }: { controller: Controller }) {
         label="Take profit"
         value={c.takeProfit}
         onChange={c.setTakeProfit}
-        placeholder="none"
-        hint="Optional. Leave blank for no take profit."
+        placeholder={c.strategy ? "none" : "required"}
+        hint={c.strategy
+          ? "Optional with a strategy. Leave blank for no take profit."
+          : "Required with no strategy: the whole position closes here."}
+      />
+      <OrderStrategyField
+        value={c.strategy}
+        onChange={c.setStrategy}
+        choices={strategies}
+        note="An EA template uses its own ladder in place of the take profit."
       />
     </div>
   );

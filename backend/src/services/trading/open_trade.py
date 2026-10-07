@@ -103,6 +103,10 @@ _EA_LADDER_TRAIL_MODE = {
 }
 
 
+MANUAL_DIALOG_SOURCE = "manual_market"
+_goal_halt = lambda: __import__("backend.src.services.risk.governor", fromlist=["x"]).halt_reason().startswith("Daily goal")  # noqa: E731
+
+
 def is_telegram_source(tg_source: Optional[str]) -> bool:
     """Did this signal come from a Telegram message, as opposed to one of the
     app's own internal generators or a manual order?
@@ -356,8 +360,12 @@ async def open_trade(
     except ImportError:
         pass
 
+    # The Market Order dialog places through the DAILY GOAL's pause only (owner,
+    # 2026-10-07). Loss halts, manual pause and breaker still refuse it.
+    _manual_dialog = tg_source == MANUAL_DIALOG_SOURCE and _goal_halt()
+
     # Trading pause — blocks MT5 order placement only; signals and generators continue.
-    if await db_module.to_db_thread(is_trading_paused):
+    if not _manual_dialog and await db_module.to_db_thread(is_trading_paused):
         _pause_until = db_module.get_app_config("trade_pause_until")
         # The cause, not only the time. Both matter: one says what to fix, the
         # other says whether waiting is an option. Until 2026-09-01 this said

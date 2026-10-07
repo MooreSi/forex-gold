@@ -4,6 +4,7 @@ import { Plus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/shared/Button";
 import { PanelShell } from "@/components/shared/PanelShell";
 import { useTradingController } from "./hooks/useTradingController";
+import { useStrategyChoices } from "./hooks/useStrategyChoices";
 import { useHeaderState } from "@/hooks/useHeaderState";
 import { ActiveTradesSection } from "./internal/ActiveTradesSection";
 import { SignalsSection } from "./internal/SignalsSection";
@@ -36,6 +37,7 @@ export function TradingPanel() {
   const c = useTradingController();
   // The shell's own header poll, for the limit form's example prices.
   const header = useHeaderState();
+  const strategies = useStrategyChoices();
   const [placing, setPlacing] = useState(false);
   const [placingLimit, setPlacingLimit] = useState(false);
 
@@ -57,13 +59,13 @@ export function TradingPanel() {
           <Button
             variant="success"
             onClick={() => setPlacing(true)}
-            disabledReason={c.disabledReason}
+            disabledReason={c.manualDisabledReason}
           >
             <Plus size={13} /> Market order
           </Button>
           <Button
             onClick={() => setPlacingLimit(true)}
-            disabledReason={c.limitDisabledReason}
+            disabledReason={c.manualDisabledReason}
           >
             <Plus size={13} /> Limit order
           </Button>
@@ -147,14 +149,16 @@ export function TradingPanel() {
         open={placing}
         onOpenChange={setPlacing}
         onPlaced={() => void c.refreshAll()}
-        disabledReason={c.disabledReason}
+        disabledReason={c.manualDisabledReason}
+        strategies={strategies}
       />
       <PlaceLimitOrderDialog
         open={placingLimit}
         onOpenChange={setPlacingLimit}
         onPlaced={() => void c.refreshAll()}
-        disabledReason={c.limitDisabledReason}
+        disabledReason={c.manualDisabledReason}
         price={header.data?.tick}
+        strategies={strategies}
       />
     </PanelShell>
   );

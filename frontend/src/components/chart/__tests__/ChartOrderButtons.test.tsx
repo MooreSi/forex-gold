@@ -9,7 +9,7 @@
  * one; that is pinned below. The dialogs' own behaviour is tested in
  * trading/__tests__/PlaceOrderDialog.test.tsx and PlaceLimitOrderDialog.test.tsx.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChartPanel } from "../ChartPanel";
@@ -42,6 +42,14 @@ afterEach(() => {
   resetPolls();
   vi.unstubAllGlobals();
 });
+
+/** The halt poll has answered and the answer has rendered. Needed before
+ *  asserting a button is ENABLED: it is enabled before the halt loads too. */
+async function haltRendered() {
+  await waitFor(() => expect(
+    fetchMock.mock.calls.some(([u]) => String(u).startsWith("/api/trading/halt"))).toBe(true));
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+}
 
 const orderCalls = () =>
   fetchMock.mock.calls.filter(([u]) => String(u).startsWith("/api/trading/orders"));
@@ -77,35 +85,39 @@ describe("order buttons on the Chart tab", () => {
     expect(orderCalls()).toEqual([]);
   });
 
-  it("disables Market with the backend's reason when trading is halted", async () => {
-    halt = { ...halt, halted: true, reason: "Trading paused by the operator." };
-    render(<ChartPanel />);
-
-    const market = screen.getByRole("button", { name: /market order/i });
-    await waitFor(() => expect(market).toBeDisabled());
-    expect(market.getAttribute("title")).toBe("Trading paused by the operator.");
-  });
-
   // Owner, 2026-10-05: a manual Limit order sits outside the daily pause and
   // any other paused trading, so it stays selectable. The backend already
   // places it through a pause (manual_limit_order checks neither the pause nor
   // the breaker; resting_revalidation exempts channel "Manual"). This replaced
   // the assertion that Limit was disabled with Market.
+  //
+  // Owner, 2026-10-07: "a market or limit order can bypass any paused
+  // trading" -- Market too. `open_trade` now skips the pause and the breaker
+  // for the dialog's "manual_market" source. These three replaced the
+  // assertions that Market was disabled by a halt and by a tripped breaker.
+  it("keeps Market selectable when trading is halted", async () => {
+    halt = { ...halt, halted: true, reason: "Trading paused by the operator." };
+    render(<ChartPanel />);
+    await haltRendered();
+
+    expect(screen.getByRole("button", { name: /market order/i })).toBeEnabled();
+  });
+
   it("keeps Limit selectable when trading is halted", async () => {
     halt = { ...halt, halted: true, reason: "Daily goal secured: +$30.00" };
     render(<ChartPanel />);
+    await haltRendered();
 
-    await waitFor(() => expect(
-      screen.getByRole("button", { name: /market order/i })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /market order/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /limit order/i })).toBeEnabled();
   });
 
-  it("keeps Limit selectable when the circuit breaker has tripped", async () => {
+  it("keeps both selectable when the circuit breaker has tripped", async () => {
     halt = { ...halt, circuit_breaker: { is_active: true, remaining_secs: 600, consec_losses: 3 } };
     render(<ChartPanel />);
+    await haltRendered();
 
-    await waitFor(() => expect(
-      screen.getByRole("button", { name: /market order/i })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /market order/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /limit order/i })).toBeEnabled();
   });
 

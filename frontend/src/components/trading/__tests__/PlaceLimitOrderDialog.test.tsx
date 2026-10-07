@@ -120,10 +120,12 @@ describe("what gets sent", () => {
     });
   });
 
+  // 2026-10-07 (owner): one "Take profit" field replaced the TP1-TP8 ladder;
+  // TP2-TP8 are still sent, as null.
   it("leaves an unset target as null so the ladder just stops there", async () => {
     open();
     await fill();
-    await userEvent.type(screen.getByLabelText("TP1"), "2440");
+    await userEvent.type(screen.getByLabelText("Take profit"), "2440");
     await userEvent.click(screen.getByRole("button", { name: /Review BUY/ }));
     await userEvent.click(screen.getByRole("button", { name: /Place this BUY/ }));
 

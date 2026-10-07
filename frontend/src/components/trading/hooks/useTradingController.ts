@@ -57,19 +57,18 @@ export function orderDisabledReason(h: HaltState | null, error: Error | null): s
 }
 
 /**
- * May a manual LIMIT order be placed right now, and if not, why not.
+ * May a manual Market or Limit order be placed right now, and if not, why not.
  *
- * Narrower than `orderDisabledReason` on purpose (owner, 2026-10-05): a manual
- * limit order sits outside the daily pause and any other paused trading, so a
- * halt reason or a tripped breaker does not grey it. That matches what the
- * backend already does: `manual_limit_order` checks neither, and
+ * Narrower than `orderDisabledReason` on purpose: a manual order sits outside
+ * the daily pause and any other paused trading, so a halt reason or a tripped
+ * breaker does not grey it. Limit since 2026-10-05; Market since 2026-10-07
+ * (owner: "a market or limit order can bypass any paused trading"). That
+ * matches the backend: `manual_limit_order` checks neither, `open_trade`
+ * skips both for the dialog's "manual_market" source, and
  * `resting_revalidation` leaves channel "Manual" orders on the book through a
  * pause. A closed market and an unreachable backend still stop it.
- *
- * Market orders keep `orderDisabledReason`: `open_trade` refuses them while
- * paused, and an enabled button that cannot work is worse than a disabled one.
  */
-export function limitOrderDisabledReason(h: HaltState | null, error: Error | null): string | null {
+export function manualOrderDisabledReason(h: HaltState | null, error: Error | null): string | null {
   if (!h) return error ? "Trading status is unknown — the app cannot reach the backend." : null;
   if (h.market_closed) return "The market is closed for the week.";
   return null;
@@ -121,8 +120,8 @@ export function useTradingController() {
     () => orderDisabledReason(halt.data, halt.error),
     [halt.data, halt.error],
   );
-  const limitDisabledReason = useMemo(
-    () => limitOrderDisabledReason(halt.data, halt.error),
+  const manualDisabledReason = useMemo(
+    () => manualOrderDisabledReason(halt.data, halt.error),
     [halt.data, halt.error],
   );
 
@@ -218,7 +217,7 @@ export function useTradingController() {
 
   return useMemo(
     () => ({
-      trades, halt, signals, disabledReason, limitDisabledReason, refreshAll,
+      trades, halt, signals, disabledReason, manualDisabledReason, refreshAll,
       schedule: schedule.data,
       setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
       setMarket, setClockOffset, setChannelLossCaps,
@@ -230,7 +229,7 @@ export function useTradingController() {
       saveTemplate, deleteTemplate, renameTemplate, installBuiltin,
       refreshTemplates,
     }),
-    [trades, halt, signals, disabledReason, limitDisabledReason, refreshAll, schedule.data,
+    [trades, halt, signals, disabledReason, manualDisabledReason, refreshAll, schedule.data,
      setScheduleEnabled, setSchedule, setDailyTarget, resumeToday,
      setMarket, setClockOffset, setChannelLossCaps,
      templates.data, saveTemplate, deleteTemplate, renameTemplate,

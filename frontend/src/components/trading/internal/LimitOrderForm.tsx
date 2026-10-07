@@ -2,6 +2,8 @@ import { Tooltip } from "@/components/shared/Tooltip";
 import { cn } from "@/lib/cn";
 import type { usePlaceLimitOrderController } from "../hooks/usePlaceLimitOrderController";
 import { limitPlaceholders, type LivePrice } from "./limitPlaceholders";
+import { OrderStrategyField } from "./OrderStrategyField";
+import type { StrategyChoice } from "./orderStrategy";
 
 type Controller = ReturnType<typeof usePlaceLimitOrderController>;
 
@@ -32,8 +34,8 @@ function Field({
 }
 
 export function LimitOrderForm({
-  controller: c, price,
-}: { controller: Controller; price?: LivePrice | null }) {
+  controller: c, price, strategies = [],
+}: { controller: Controller; price?: LivePrice | null; strategies?: StrategyChoice[] }) {
   const eg = limitPlaceholders(c.direction, price);
   return (
     <div className="space-y-3">
@@ -75,31 +77,21 @@ export function LimitOrderForm({
         hint="Leave blank to size the trade from your risk settings."
       />
 
-      <div>
-        <span className="text-xs text-ink-2">Targets</span>
-        <div className="mt-1 grid grid-cols-4 gap-2">
-          {c.targets.map((value, i) => (
-            <Tooltip
-              key={i}
-              label={i === 0
-                ? "The first take-profit. A scale-out strategy closes part of the position here and manages the rest."
-                : `Take-profit ${i + 1}. Optional — leave it blank and the ladder simply stops at the level before it. Blank is not the same as 0, which is a real price.`}
-            >
-              <input
-                aria-label={`TP${i + 1}`}
-                value={value}
-                inputMode="decimal"
-                placeholder={`TP${i + 1}`}
-                onChange={(e) => c.setTarget(i, e.target.value)}
-                className="num rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1 placeholder:text-ink-3"
-              />
-            </Tooltip>
-          ))}
-        </div>
-        <span className="mt-1 block text-[11px] text-ink-3">
-          All optional. Leave a level blank and the ladder simply stops there.
-        </span>
-      </div>
+      <Field
+        label="Take profit"
+        value={c.takeProfit}
+        onChange={c.setTakeProfit}
+        placeholder="required"
+        hint={c.strategy
+          ? "The strategy's first target. It manages the position from there."
+          : "The whole position closes here."}
+      />
+      <OrderStrategyField
+        value={c.strategy}
+        onChange={c.setStrategy}
+        choices={strategies}
+        note="An EA template uses its own ladder, from the resting price, in place of the take profit."
+      />
 
       <Field label="Notes" value={c.notes} onChange={c.setNotes} placeholder="" />
     </div>

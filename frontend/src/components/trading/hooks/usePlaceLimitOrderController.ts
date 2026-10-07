@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { api, ApiError } from "@/api/client";
 import { priceField } from "./usePlaceOrderDialogController";
+import { SINGLE_TP } from "../internal/orderStrategy";
 
 export type Direction = "BUY" | "SELL";
 type Step = "form" | "confirm" | "sending";
@@ -20,6 +21,10 @@ export interface LimitOrderPrefill {
  * blanks: an empty field stays `null` so the engine keeps whatever decision it
  * would have made. The zone is the part that differs — a limit order has a
  * range rather than a price, and the confirmation says both edges.
+ *
+ * One take profit and a strategy, the same as the market order (owner,
+ * 2026-10-07: "keep them consistent"), in place of eight TP levels. A blank
+ * strategy is sent as `SINGLE_TP`; the backend's own null is Limit Runner.
  */
 export function usePlaceLimitOrderController(
   onPlaced: () => void, initial?: LimitOrderPrefill | null,
@@ -30,8 +35,8 @@ export function usePlaceLimitOrderController(
   const [entryLow, setEntryLow] = useState(at(initial?.entry));
   const [entryHigh, setEntryHigh] = useState(at(initial?.entry));
   const [stopLoss, setStopLoss] = useState(at(initial?.stopLoss));
-  const [targets, setTargets] = useState<string[]>(
-    [at(initial?.takeProfit), "", "", "", "", "", "", ""]);
+  const [takeProfit, setTakeProfit] = useState(at(initial?.takeProfit));
+  const [strategy, setStrategy] = useState("");
   const [lots, setLots] = useState("");
   const [notes, setNotes] = useState("");
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -45,10 +50,9 @@ export function usePlaceLimitOrderController(
   };
 
   const request = useMemo(() => {
-    const tps: Record<string, number | null> = {};
-    targets.forEach((t, i) => {
-      tps[`tp${i + 1}`] = numeric(t);
-    });
+    // One target. TP2-TP8 are sent as null so nothing above TP1 is implied.
+    const tps: Record<string, number | null> = { tp1: numeric(takeProfit) };
+    for (let i = 2; i <= 8; i++) tps[`tp${i}`] = null;
     return {
       direction,
       entry_low: numeric(entryLow) ?? 0,
@@ -56,9 +60,10 @@ export function usePlaceLimitOrderController(
       stop_loss: numeric(stopLoss) ?? 0,
       lot_size: numeric(lots),
       notes,
+      strategy: strategy || SINGLE_TP,
       ...tps,
     };
-  }, [direction, entryLow, entryHigh, stopLoss, lots, notes, targets]);
+  }, [direction, entryLow, entryHigh, stopLoss, lots, notes, takeProfit, strategy]);
 
   /** Why the form cannot be reviewed yet, in the user's words. A limit order
    *  with no zone and no stop is not an order. */
@@ -110,13 +115,10 @@ export function usePlaceLimitOrderController(
     );
   }, [direction, request]);
 
-  const setTarget = useCallback((index: number, value: string) => {
-    setTargets((t) => t.map((v, i) => (i === index ? value : v)));
-  }, []);
-
   return {
     step, direction, setDirection, entryLow, setEntryLow, entryHigh, setEntryHigh,
-    stopLoss, setStopLoss, targets, setTarget, lots, setLots, notes, setNotes,
+    stopLoss, setStopLoss, takeProfit, setTakeProfit, strategy, setStrategy,
+    lots, setLots, notes, setNotes,
     refusal, failure, request, summary, incomplete, review, send, reset,
   };
 }

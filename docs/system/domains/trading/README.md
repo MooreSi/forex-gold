@@ -130,6 +130,42 @@ instead, because they are decisions, not renames: `strategy` is stored as
 marker like `manual_market`. Deriving that in TypeScript would be a second
 answer to what a trade's source is.
 
+## Manual orders: strategy choice, and through a pause (2026-10-07)
+
+Owner: "a market or limit order can bypass any paused trading", and both
+dialogs choose a strategy or none.
+
+- **The Market Order dialog places through a pause and a tripped breaker.**
+  `open_trade` skips both checks for `tg_source == MANUAL_DIALOG_SOURCE`
+  ("manual_market"), the dialog's own stamp. Set & Forget, ORB and every
+  automated route still stop. Max open trades and the Local/Remote
+  stand-down still apply. The manual limit order already skipped both
+  (2026-10-05). The frontend gate is `manualOrderDisabledReason` for both
+  buttons: only a closed market or an unreachable backend greys them.
+- **No strategy is a single take profit: `orb_fixed`.** One full close at
+  TP1, no partials, breakeven or trailing, never DPM, in Python and in the EA
+  (`ManageOrbFixed`). `manual_market_order.SINGLE_TP_STRATEGY` names it; it
+  refuses without a take profit: with none there is nothing to close at, and
+  the trade would run unmanaged to its stop (`TpCleared` ignores a missing TP). The dialog sends it for blank because the backend's null is
+  the global `trade_strategy`, Scale Out + Breakeven, which is what a plain
+  market order used to fall into. **Such trades show as "ORB/IVB Fixed" in
+  history**, told apart by `tg_source`.
+- **The Limit Order dialog has one take profit and the same choice.**
+  `open_manual_limit_order(strategy=...)`: None stays Limit Runner for other
+  callers. Built-ins take their shape from `limit_order_signal.management_shape`
+  (shared with the "[LIMITS]" path); a single-mode template rests with its
+  fields (EA v1.07 `ApplyTemplateToPending`) and its own ladder measured from
+  the resting price replaces the typed TP, as `open_trade` does for a market
+  order; a grid template is refused. The chosen strategy is the
+  `vantage_pending_orders` stamp read back at fill time.
+- **Not done:** a template on either manual path sizes from the Lots field or
+  the global risk settings, not the template's own risk %/anchor lot.
+  `ea_bridge.place_pending_order`'s docstring still says templates on resting
+  orders wait for limit-orders/030; the EA code says they landed.
+- **Not yet run against a demo account.** Pinned by
+  `tests/trading/test_manual_orders_through_a_pause.py` and
+  `frontend/.../OrderStrategyChoice.test.tsx`.
+
 ## Resume must clear the hold that is actually on (2026-09-21)
 
 Three separate mechanisms stop new orders: the governor's manual pause, the

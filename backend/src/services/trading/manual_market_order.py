@@ -29,7 +29,13 @@ from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
 from backend.src.services.trading.open_trade import open_trade
-from backend.src.utils.models import STRATEGY_SCALE_OUT, STRATEGY_NAMES
+from backend.src.utils.models import STRATEGY_ORB_FIXED, STRATEGY_SCALE_OUT, STRATEGY_NAMES
+
+# The dialogs' blank strategy (owner, 2026-10-07): "just use the take profit
+# figure which would be a 100% take profit". `orb_fixed` is exactly that in
+# Python and the EA alike: one full close at TP1, no partials, no breakeven,
+# no trailing, and never DPM (monitor_cycle dispatches it first).
+SINGLE_TP_STRATEGY = STRATEGY_ORB_FIXED
 
 
 def telegram_title(source_name: str) -> str:
@@ -76,6 +82,12 @@ async def open_manual_market_order(
     direction = direction.upper()
     if direction not in ("BUY", "SELL"):
         raise ValueError(f"Invalid direction: {direction}")
+
+    if strategy == SINGLE_TP_STRATEGY and not (take_profit and float(take_profit) > 0):
+        raise ValueError(
+            "A single take profit needs a take profit price — enter one, "
+            "or choose a strategy to manage the trade."
+        )
 
     rs = db_module.get_risk_settings()
 

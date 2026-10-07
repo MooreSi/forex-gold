@@ -400,7 +400,11 @@ describe("a halt the operator can see before they click", () => {
       return { ok: true, status: 200, json: async () => ({}) };
     });
 
-  it("greys the controls for a tripped circuit breaker, and says so", async () => {
+  // Owner, 2026-10-07: "a market or limit order can bypass any paused
+  // trading". The breaker still SAYS so (the status chip), but no longer greys
+  // Market order, which the backend now places through it. This replaced the
+  // assertion that the button was disabled with the breaker in its title.
+  it("says a tripped circuit breaker has tripped, and leaves Market order usable", async () => {
     // The governor is quiet — this halt comes ONLY from the breaker, which is
     // the case the old `tripped` key could never see.
     vi.stubGlobal("fetch", withHalt({
@@ -413,10 +417,8 @@ describe("a halt the operator can see before they click", () => {
 
     render(<TradingPanel />);
 
-    const button = await screen.findByRole("button", { name: /Market order/i });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute(
-      "title", expect.stringContaining("circuit breaker"));
+    expect(await screen.findByText(/circuit breaker has tripped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Market order/i })).toBeEnabled();
   });
 
   it("leaves them alone when the breaker is merely enabled", async () => {
@@ -435,7 +437,10 @@ describe("a halt the operator can see before they click", () => {
 
   // Owner, 2026-10-05: Limit order sits outside any pause. The backend places
   // a manual limit through one already; only the button was in the way.
-  it("keeps Limit order selectable through a pause, and Market greyed", async () => {
+  // Owner, 2026-10-07: Market order too. These replaced "...and Market
+  // greyed" and the breaker case's Market-disabled assertion. The status
+  // chip showing the reason is what proves the halt has loaded.
+  it("keeps both order buttons selectable through a pause", async () => {
     vi.stubGlobal("fetch", withHalt({
       reason: "Daily goal secured: +$30.00 today vs a goal of $25.00",
       market_closed: false,
@@ -444,12 +449,12 @@ describe("a halt the operator can see before they click", () => {
 
     render(<TradingPanel />);
 
-    const market = await screen.findByRole("button", { name: /Market order/i });
-    await waitFor(() => expect(market).toBeDisabled());
+    expect(await screen.findByText(/Daily goal secured/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Market order/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Limit order/i })).toBeEnabled();
   });
 
-  it("keeps Limit order selectable through a tripped breaker", async () => {
+  it("keeps both order buttons selectable through a tripped breaker", async () => {
     vi.stubGlobal("fetch", withHalt({
       reason: "",
       market_closed: false,
@@ -458,8 +463,8 @@ describe("a halt the operator can see before they click", () => {
 
     render(<TradingPanel />);
 
-    await waitFor(() => expect(
-      screen.getByRole("button", { name: /Market order/i })).toBeDisabled());
+    expect(await screen.findByText(/circuit breaker has tripped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Market order/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Limit order/i })).toBeEnabled();
   });
 

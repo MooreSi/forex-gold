@@ -6,6 +6,7 @@ import {
 } from "./hooks/usePlaceLimitOrderController";
 import { LimitOrderForm } from "./internal/LimitOrderForm";
 import type { LivePrice } from "./internal/limitPlaceholders";
+import { managementSentence, type StrategyChoice } from "./internal/orderStrategy";
 
 interface PlaceLimitOrderDialogProps {
   open: boolean;
@@ -16,6 +17,8 @@ interface PlaceLimitOrderDialogProps {
   price?: LivePrice | null;
   /** Filled in from a position drawn on the chart; read when mounted. */
   prefill?: LimitOrderPrefill | null;
+  /** What the Strategy choice offers besides blank (a single take profit). */
+  strategies?: StrategyChoice[];
 }
 
 /**
@@ -24,7 +27,7 @@ interface PlaceLimitOrderDialogProps {
  * on the confirmation.
  */
 export function PlaceLimitOrderDialog({
-  open, onOpenChange, onPlaced, disabledReason, price, prefill,
+  open, onOpenChange, onPlaced, disabledReason, price, prefill, strategies = [],
 }: PlaceLimitOrderDialogProps) {
   const c = usePlaceLimitOrderController(onPlaced, prefill);
 
@@ -69,11 +72,14 @@ export function PlaceLimitOrderDialog({
       }
     >
       {c.step === "form" ? (
-        <LimitOrderForm controller={c} price={price} />
+        <LimitOrderForm controller={c} price={price} strategies={strategies} />
       ) : (
         <div className="space-y-3">
           <p data-testid="limit-order-summary" className="text-sm text-ink-1">
             {c.summary}
+          </p>
+          <p data-testid="order-management" className="text-xs text-ink-2">
+            {managementSentence(c.strategy, strategies)}
           </p>
           <p className="text-xs text-warning">
             This order rests at the broker and can fill at any time, including

@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { api } from "@/api/client";
 import { usePoll } from "@/hooks/usePoll";
 import type { HaltState } from "@/api/types";
-import { limitOrderDisabledReason, orderDisabledReason } from "./useTradingController";
+import { manualOrderDisabledReason, orderDisabledReason } from "./useTradingController";
 
 /**
  * The halt poll ("trading/halt", shared by key with every other reader) and
@@ -22,9 +22,9 @@ export function useOrderGate() {
     () => orderDisabledReason(halt.data, halt.error),
     [halt.data, halt.error],
   );
-  const limitDisabledReason = useMemo(
-    () => limitOrderDisabledReason(halt.data, halt.error),
+  const manualDisabledReason = useMemo(
+    () => manualOrderDisabledReason(halt.data, halt.error),
     [halt.data, halt.error],
   );
-  return { halt, disabledReason, limitDisabledReason };
+  return { halt, disabledReason, manualDisabledReason };
 }

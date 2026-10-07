@@ -522,14 +522,14 @@ class TradingRuntime:
         tp5: Optional[float] = None, tp6: Optional[float] = None,
         tp7: Optional[float] = None, tp8: Optional[float] = None,
         lot_size: Optional[float] = None,
-        notes: str = "",
+        notes: str = "", strategy: Optional[str] = None,
     ) -> dict:
         """Place a genuine resting BuyLimit/SellLimit via the EA from the
         Trading > Limit Order form — see core_manual_limit_order.py."""
         return await _open_manual_limit_order_impl(
             self._bridge, direction, entry_low, entry_high, stop_loss,
             tp1=tp1, tp2=tp2, tp3=tp3, tp4=tp4, tp5=tp5, tp6=tp6, tp7=tp7, tp8=tp8,
-            lot_size=lot_size, notes=notes,
+            lot_size=lot_size, notes=notes, strategy=strategy,
             starting_balance=self._cfg.get("starting_balance", 1000.0),
         )
 

@@ -147,8 +147,11 @@ describe("turning a selected position into an order", () => {
     await userEvent.click(screen.getByRole("button", { name: /Place this BUY/ }));
 
     await waitFor(() => expect(sent("/api/trading/orders/market")).toHaveLength(1));
+    // 2026-10-07 (owner): no strategy chosen is a single take profit, sent
+    // as orb_fixed, not the backend's null (Scale Out + Breakeven).
     expect(sent("/api/trading/orders/market")[0].body).toEqual({
       direction: "BUY", lot_size: null, stop_loss: 4140, take_profit: 4170,
+      strategy: "orb_fixed",
     });
   });
 
@@ -166,7 +169,8 @@ describe("turning a selected position into an order", () => {
     expect(within(dialog).getByLabelText("Entry zone low")).toHaveValue("4150");
     expect(within(dialog).getByLabelText("Entry zone high")).toHaveValue("4150");
     expect(within(dialog).getByLabelText("Stop loss")).toHaveValue("4160");
-    expect(within(dialog).getByLabelText("TP1")).toHaveValue("4120");
+    // 2026-10-07 (owner): one "Take profit" field replaced TP1-TP8.
+    expect(within(dialog).getByLabelText("Take profit")).toHaveValue("4120");
   });
 
   it("keeps the position when Delete is pressed inside its order dialog", async () => {

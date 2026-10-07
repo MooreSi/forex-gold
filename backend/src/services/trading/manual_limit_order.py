@@ -32,9 +32,15 @@ from backend.src.services.trading import trade_repo
 from backend.src.services.telegram import alerts as telegram_alerts
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
-from backend.src.services.trading.limit_order_signal import _limit_runner_pcts
+from backend.src.services.broker import ea_templates
+from backend.src.services.trading import template_levels
+from backend.src.services.trading.open_trade import resolve_template_tps
+from backend.src.services.trading.limit_order_signal import _limit_runner_pcts, management_shape
+from backend.src.services.trading.manual_market_order import SINGLE_TP_STRATEGY
 from backend.src.services.risk.strategy_params import get_strategy_params
-from backend.src.utils.models import STRATEGY_LIMIT_RUNNER
+from backend.src.utils.models import STRATEGY_LIMIT_RUNNER, STRATEGY_NAMES
+
+__all__ = ["open_manual_limit_order", "SINGLE_TP_STRATEGY"]
 
 _DEFAULT_EXPIRE_MINUTES = 240
 
@@ -52,10 +58,31 @@ async def open_manual_limit_order(
     lot_size: Optional[float] = None,
     notes: str = "",
     starting_balance: float = 1000.0,
+    strategy: Optional[str] = None,
 ) -> dict:
+    """`strategy` None is Limit Runner, as before; the dialog sends one
+    (owner, 2026-10-07): SINGLE_TP_STRATEGY for its blank choice, a built-in
+    strategy, or a single-mode EA template, which the EA runs on a resting
+    order since v1.07 (ApplyTemplateToPending). A template's own ladder,
+    measured from the resting price, replaces the typed take profit, as
+    open_trade's does for the market order."""
     direction = direction.upper()
     if direction not in ("BUY", "SELL"):
         raise ValueError(f"Invalid direction: {direction}")
+    strategy = strategy or STRATEGY_LIMIT_RUNNER
+    template: Optional[dict] = None
+    if ea_templates.is_template_override(strategy):
+        if ea_templates.is_grid_template(strategy):
+            raise ValueError(
+                "A grid EA template stages its own legs and cannot rest as one "
+                "limit order — choose a single-mode template or a strategy."
+            )
+        template = ea_templates.get_ea_template(
+            ea_templates.template_name_from_override(strategy))
+        if template is None:
+            raise ValueError(f"EA template not found: {strategy}")
+    elif strategy not in STRATEGY_NAMES:
+        raise ValueError(f"Unknown strategy: {strategy}")
 
     from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()
@@ -69,10 +96,16 @@ async def open_manual_limit_order(
     tps = {n: v for n, v in enumerate(
         [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8], start=1
     ) if v is not None}
+    price = entry_high if direction == "BUY" else entry_low
+    if template is not None:
+        _atr = await template_levels.template_atr(template, bridge)
+        _tpl_tps, _, _ = resolve_template_tps(
+            template, direction, template_levels.PriceRef(price),
+            [tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8], "Manual", atr=_atr)
+        if _tpl_tps:
+            tps = {int(k): float(v) for k, v in _tpl_tps.items()}
     if not tps:
         raise ValueError("At least TP1 is required.")
-
-    price = entry_high if direction == "BUY" else entry_low
 
     rs = db_module.get_risk_settings()
     strategy_lot = lot_sizing.global_fixed_lot(rs)  # 0 unless Fixed lots mode
@@ -90,15 +123,23 @@ async def open_manual_limit_order(
     lot = max(0.01, round(lot, 2))
 
     params    = get_strategy_params(STRATEGY_LIMIT_RUNNER)
-    be_at_pos = max(int(params.get("be_at_pos", 1)) - 1, 0)
-    pcts      = _limit_runner_pcts(len(tps), False, params)
+    trail_mode = None
+    if strategy == STRATEGY_LIMIT_RUNNER or template is not None:
+        # A template is managed from its tpl_* fields; these are the inert
+        # placeholders limit_order_signal sends it too.
+        be_at_pos = max(int(params.get("be_at_pos", 1)) - 1, 0)
+        pcts      = _limit_runner_pcts(len(tps), False, params)
+    else:
+        _, pcts, be_at_pos, trail_mode = management_shape(strategy, len(tps), False, params)
 
     trade_id = str(uuid.uuid4())[:16]
     ack = await _ea.place_pending_order(
         trade_id, direction, price, lot, stop_loss, tps, pcts, be_at_pos,
-        strategy=STRATEGY_LIMIT_RUNNER,
+        strategy=strategy,
         expire_minutes=_DEFAULT_EXPIRE_MINUTES,
         close_full_on_last=True,
+        trail_mode=trail_mode,
+        template=template,
     )
     if ack.get("type") != "pending_order_placed":
         raise RuntimeError(f"Limit order rejected by EA — {ack.get('error', 'unknown error')}")
@@ -113,7 +154,7 @@ async def open_manual_limit_order(
         now, None,
         (trade_id, signal_id, None, "Manual", direction, price, stop_loss,
          json.dumps(tps), json.dumps(pcts), be_at_pos, 0,
-         lot, ticket, "working", now, STRATEGY_LIMIT_RUNNER),
+         lot, ticket, "working", now, strategy),
     )
 
     _tg_text = (
@@ -121,7 +162,7 @@ async def open_manual_limit_order(
         f"Direction: {direction}  |  Lots: {lot}\n"
         f"Price: ${price:.2f}  |  SL: ${stop_loss:.2f}\n"
         f"MT5 Ticket: {ticket}\n"
-        f"Strategy: Limit Runner"
+        f"Strategy: {'Single take profit' if strategy == SINGLE_TP_STRATEGY else STRATEGY_NAMES.get(strategy, strategy)}"
     )
     asyncio.create_task(telegram_alerts.send_message(_tg_text, trade_id, "manual_limit_open"))
 

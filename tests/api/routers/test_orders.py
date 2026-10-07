@@ -147,6 +147,22 @@ def test_a_limit_order_forwards_four_positionals_then_the_eight_targets(
     assert kwargs["lot_size"] is None
 
 
+def test_a_limit_order_forwards_the_dialogs_strategy(make_client, sentinel_engine):
+    """2026-10-07: the dialog chooses how the fill is managed. Omitted, it is
+    None, which the engine reads as Limit Runner, as before."""
+    make_client().post("/api/trading/orders/limit", json={
+        "direction": "BUY", "entry_low": 2400.0, "entry_high": 2405.0,
+        "stop_loss": 2390.0, "tp1": 2420.0, "strategy": "orb_fixed",
+    })
+    make_client().post("/api/trading/orders/limit", json={
+        "direction": "BUY", "entry_low": 2400.0, "entry_high": 2405.0,
+        "stop_loss": 2390.0, "tp1": 2420.0,
+    })
+    calls = [c for c in sentinel_engine.calls if c[0] == "open_manual_limit_order"]
+    assert calls[0][2]["strategy"] == "orb_fixed"
+    assert calls[1][2]["strategy"] is None
+
+
 def test_opening_from_a_signal_forwards_the_override_and_the_age_multiplier(
     make_client, sentinel_engine,
 ):

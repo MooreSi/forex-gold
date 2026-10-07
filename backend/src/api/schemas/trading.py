@@ -47,6 +47,8 @@ class LimitOrderRequest(BaseModel):
     tp8: Optional[float] = None
     lot_size: Optional[float] = None
     notes: str = ""
+    # None is Limit Runner, as before; the dialog sends its choice (2026-10-07).
+    strategy: Optional[str] = None
 
 
 class CloseRequest(BaseModel):

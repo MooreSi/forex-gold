@@ -89,6 +89,7 @@ async def place_limit_order(
             tp5=body.tp5, tp6=body.tp6, tp7=body.tp7, tp8=body.tp8,
             lot_size=body.lot_size,
             notes=body.notes,
+            strategy=body.strategy,
         )
     # The EA's rejection (RuntimeError) and a missing EA (ConnectionError) are
     # the limit path's refusals. TimeoutError is neither and stays a 500: the

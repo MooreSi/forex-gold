@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { api, ApiError } from "@/api/client";
 import type { MarketOrderRequest } from "@/api/types";
+import { SINGLE_TP } from "../internal/orderStrategy";
 
 export type Direction = "BUY" | "SELL";
 type Step = "form" | "confirm" | "sending";
@@ -29,6 +30,11 @@ export const priceField = (n: number) => String(Math.round(n * 100) / 100);
  *   the API, because `null` is what tells the engine to compute an ATR stop
  *   through DPM. Substituting a number here would quietly take that decision
  *   away from the risk engine.
+ *
+ * The strategy is the one exception to "blank means blank" (owner,
+ * 2026-10-07): a blank strategy is sent as `SINGLE_TP`, a single take profit,
+ * because the backend's own null is the global Scale Out + Breakeven, which
+ * is what this dialog used to fall into without being asked.
  */
 export function usePlaceOrderDialogController(
   onPlaced: () => void, initial?: MarketOrderPrefill | null,
@@ -38,6 +44,7 @@ export function usePlaceOrderDialogController(
   const [lots, setLots] = useState("");
   const [stopLoss, setStopLoss] = useState(initial ? priceField(initial.stopLoss) : "");
   const [takeProfit, setTakeProfit] = useState(initial ? priceField(initial.takeProfit) : "");
+  const [strategy, setStrategy] = useState("");
   const [refusal, setRefusal] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -54,8 +61,9 @@ export function usePlaceOrderDialogController(
       lot_size: numeric(lots),
       stop_loss: numeric(stopLoss),
       take_profit: numeric(takeProfit),
+      strategy: strategy || SINGLE_TP,
     }),
-    [direction, lots, stopLoss, takeProfit],
+    [direction, lots, stopLoss, takeProfit, strategy],
   );
 
   const reset = useCallback(() => {
@@ -105,7 +113,7 @@ export function usePlaceOrderDialogController(
 
   return {
     step, direction, setDirection, lots, setLots, stopLoss, setStopLoss,
-    takeProfit, setTakeProfit, refusal, failure, request, summary,
+    takeProfit, setTakeProfit, strategy, setStrategy, refusal, failure, request, summary,
     review, send, reset,
   };
 }

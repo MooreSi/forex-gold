@@ -10,6 +10,7 @@ Uses LightGBMRegressor + SGDRegressor; predicts R-multiple (positive = profitabl
 """
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import time
@@ -30,7 +31,7 @@ RETRAIN_EVERY = _RETRAIN_EVERY
 
 _data_dir: Optional[Path] = None
 _model_batch  = None   # LightGBM or RandomForest
-_model_online = None   # SRElassifier
+_model_online = None   # SGDRegressor
 _labeled_count = 0
 # Version history: docs/system/domains/engines/README.md (rationale, not code).
 _version = "re_ml_v9"
@@ -44,6 +45,10 @@ from backend.src.services.reversal_engine import ml_handover as _ho  # noqa: E40
 # only until one of them is edited.
 _train_history: list[dict] = []
 _prediction_health: dict = {"status": "untrained", "errors": []}
+_online_update_health: dict = {
+    "status": "unknown", "successful_updates": 0, "failed_updates": 0,
+    "last_signal_id": None, "last_error": None,
+}
 
 # REF pattern counters: level_type → {trades, wins, touches}
 #   trades  = correlation matches recorded for this level type (existing semantics)
@@ -55,8 +60,11 @@ _ref_level_stats: dict[str, dict] = {}
 
 
 def init(data_dir: str) -> None:
-    global _data_dir
+    global _data_dir, _online_update_health
     _data_dir = Path(data_dir)
+    _online_update_health = {"status": "unknown", "successful_updates": 0,
+                             "failed_updates": 0, "last_signal_id": None,
+                             "last_error": None}
     _load_all()
 
 
@@ -82,6 +90,7 @@ def _save_all() -> None:
             "labeled_count": labeled,
             "train_history": _train_history[-20:],
             "ref_level_stats": _ref_level_stats,
+            "online_update_health": dict(_online_update_health),
         }
         joblib.dump(meta, _data_dir / "re_ml_meta.pkl")
         if _model_batch is not None:
@@ -135,6 +144,7 @@ def _load_all() -> None:
             _labeled_count  = meta.get("labeled_count", 0)
             _train_history  = meta.get("train_history", [])
             _ref_level_stats = meta.get("ref_level_stats", {})
+            _online_update_health.update(meta.get("online_update_health") or {})
         batch_path  = _data_dir / "re_ml_batch.pkl"
         online_path = _data_dir / "re_ml_online.pkl"
         if batch_path.exists():
@@ -578,31 +588,34 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     import numpy as np
     fa = np.array(feats, dtype=float).reshape(1, -1)
 
-    # Online update — SGDRegressor with huber loss
-    if _model_online is None:
-        from sklearn.linear_model import SGDRegressor
-        _model_online = SGDRegressor(
-            loss="huber", epsilon=0.1, random_state=42
-        )
-    # Check if saved model is an old classifier and reset it
-    if hasattr(_model_online, "classes_") or _ho.model_width(
-            None, _model_online) not in (None, len(feats)):
-        _log.info("[RE-ML] Online model is an old classifier or the wrong width "
-                  "— resetting to SGDRegressor")
-        from sklearn.linear_model import SGDRegressor
-        _model_online = SGDRegressor(
-            loss="huber", epsilon=0.1, random_state=42
-        )
+    _online_update_health["last_signal_id"] = signal_id
     try:
+        # partial_fit may mutate before raising. Publish only a valid fit;
+        # a failed update must not corrupt the model used for scoring/saving.
+        candidate = copy.deepcopy(_model_online)
+        if candidate is None or hasattr(candidate, "classes_") or _ho.model_width(
+                None, candidate) not in (None, len(feats)):
+            from sklearn.linear_model import SGDRegressor
+            candidate = SGDRegressor(loss="huber", epsilon=0.1, random_state=42)
         # Unweighted as of v5. The old 2x weight on losing samples existed to
         # compensate for a label that priced every loss at a flat -1.0R; the
         # realised-R label now carries that magnitude itself (losses average
         # -1.22R and reach -5.75R), so keeping the multiplier would count the
         # same asymmetry twice and over-penalise every loser.
-        _model_online.partial_fit(fa, [label])
-    except Exception:
-        pass
+        candidate.partial_fit(fa, [label])
+        for attr in ("coef_", "intercept_"):
+            if not np.isfinite(getattr(candidate, attr, [])).all():
+                raise ValueError(f"non-finite online {attr}")
+        _model_online = candidate
+        _online_update_health.update(status="ok", last_error=None)
+        _online_update_health["successful_updates"] += 1
+    except Exception as exc:
+        _online_update_health.update(status="error", last_error=f"{type(exc).__name__}: {exc}")
+        _online_update_health["failed_updates"] += 1
+        _log.exception("[RE-ML] online update failed signal=%s — prior model retained", signal_id)
 
+    # Eligible labels still feed batch training even when online fitting fails.
+    # This counter is not a count of successful online updates.
     _labeled_count += 1
 
     # Batch retrain
@@ -662,6 +675,7 @@ def summary() -> dict:
         "features":      FEATURE_NAMES,
         "n_features":    len(FEATURE_NAMES),
         "prediction_health": dict(_prediction_health),
+        "online_update_health": dict(_online_update_health),
     }
 
 
@@ -682,6 +696,7 @@ def get_ml_metrics() -> dict:
         "accuracy":         None,
         "train_history":    _train_history,
         "labeled_count":    _labeled_count,
+        "online_update_health": dict(_online_update_health),
     }
     try:
         from backend.src.services.reversal_engine import reversal_engine_repo as re_db
@@ -734,6 +749,7 @@ def get_ml_metrics() -> dict:
             "accuracy":         accuracy,
             "train_history":    _train_history,
             "labeled_count":    _labeled_count,
+            "online_update_health": dict(_online_update_health),
         }
     except Exception as e:
         _log.debug("[RE-ML] metrics error: %s", e)

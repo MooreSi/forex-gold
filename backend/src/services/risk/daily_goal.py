@@ -1,8 +1,8 @@
 """The daily profit goal: stop new entries once today's profit is secured.
 
 Risk > Stopping for the day > Daily goal (owner, 2026-09-29,
-docs/todo/risk/020). Once realised P&L since the start of the broker day
-reaches the goal, trading stops until the next broker day. Open trades are
+docs/todo/risk/020). Once realised P&L since 00:00 UTC (the Calendar's day)
+reaches the goal, trading stops until the next Calendar day. Open trades are
 left alone; only NEW entries stop. With trades still open the goal is only
 HELD, not secured: it becomes the day's halt when the last one closes with the
 day still at the goal, and lifts when their losses took it back under (owner,
@@ -61,9 +61,19 @@ SWEEP_EVERY_S = 5.0
 BASELINE_KEY = "daily_goal_baseline_ts"
 
 
+def _goal_day_start() -> float:
+    """00:00 UTC today: the Calendar's day, not the broker day (22:00 BST).
+
+    The header and the Calendar file a close by its UTC date, and a goal
+    judged on another day secured "+$26.15" while the header read "+$18.51"
+    (owner, 2026-10-08). The daily-loss limit uses the same day.
+    """
+    return _gov.calendar_day_start_ts()
+
+
 def _window_start() -> float:
-    """The broker day's start, or the last manual Resume if that is later."""
-    day_start = _gov.rg_day_start_ts()
+    """The goal's day start, or the last manual Resume if that is later."""
+    day_start = _goal_day_start()
     try:
         baseline = float(db_module.get_app_config(BASELINE_KEY) or 0)
     except (TypeError, ValueError):
@@ -86,7 +96,7 @@ def goal_figure(day_realised: float, window_realised: float) -> float:
 def _local_realised() -> tuple[float, float]:
     """(goal figure, whole day) from the local table."""
     window, _peak = _gov.day_pnl_and_peak(_window_start())
-    day, _peak = _gov.day_pnl_and_peak(_gov.rg_day_start_ts())
+    day, _peak = _gov.day_pnl_and_peak(_goal_day_start())
     return goal_figure(day, window), day
 
 
@@ -175,7 +185,9 @@ SECURED_PREFIX = "Daily goal secured"
 
 
 def _write_halt(reason: str) -> None:
-    until = _gov.rg_day_start_ts() + 86400.0
+    # Until the goal's day ends: a halt that lifted at the broker's rollover
+    # would be re-written on the next sweep, the day still being at the goal.
+    until = _goal_day_start() + 86400.0
     with db_module.db():
         db_module.set_app_config("trade_pause_until", str(until))
         db_module.set_app_config("risk_halt_reason", reason)
@@ -192,7 +204,7 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
                      day_realised: Optional[float] = None) -> bool:
     """Stop new entries once the goal is reached. True if it wrote a halt.
 
-    The goal is SECURED (halt until the next broker day) only when nothing is
+    The goal is SECURED (halt until the goal's day ends) only when nothing is
     open. Reached with trades still open, it is a HOLD: no new entries, the
     same pause pair with a "waiting" reason. Owner, 2026-09-30: open trades
     that close at a loss can take the day back under the goal, and then it
@@ -210,7 +222,7 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
         return False
     if open_positions == 0:
         _write_halt(reason)
-        log.warning("[RG] %s — new entries stopped until the next broker day", reason)
+        log.warning("[RG] %s — new entries stopped until the day ends (00:00 UTC)", reason)
         return True
     waiting = ("open trades" if open_positions is None
                else f"{open_positions} open trade{'s' if open_positions != 1 else ''}")
@@ -292,7 +304,7 @@ async def broker_realised(bridge: Any) -> tuple[bool, Optional[float], Optional[
     in_window = await _todays.since(bridge, window)
     if in_window is None:
         return True, None, None
-    day_start = _gov.rg_day_start_ts()
+    day_start = _goal_day_start()
     day = in_window if window <= day_start else await _todays.since(bridge, day_start)
     if day is None:
         return True, None, None

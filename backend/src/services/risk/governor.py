@@ -408,6 +408,18 @@ def rg_day_start_ts() -> float:
     return (broker_midnight - timedelta(hours=3)).timestamp()
 
 
+def calendar_day_start_ts() -> float:
+    """00:00 UTC today: the day the header and the Calendar file closes by.
+
+    The daily goal and the daily-loss limit count from here, not from the
+    broker rollover (owner, 2026-10-08), so the halts agree with the figures
+    on screen. Today's UTC date, not the trading clock's: ahead of UTC, the
+    clock's date starts a day that has not begun.
+    """
+    d = datetime.now(timezone.utc).date()
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp()
+
+
 def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
     """(realised P&L so far today, the highest it reached today).
 
@@ -444,7 +456,7 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
     if max_daily <= 0:
         return None
     # Measured from the last manual resume when there has been one, not always
-    # from the broker day. Without that, resuming after this limit fires is a
+    # from the Calendar day. Without that, resuming after this limit fires is a
     # no-op -- the day's losses are already past the threshold, so it re-halts
     # on the next close and Resume does nothing but waste a trade.
     #
@@ -452,9 +464,15 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
     # a hard ceiling on the DAY, it is "another `max_daily_loss_pct` from where
     # you resumed". Someone who keeps resuming can keep losing that much again.
     # The protection it still gives is a bounded loss per resume, and it goes
-    # back to being a true daily ceiling at the next broker day, when the
+    # back to being a true daily ceiling at the next Calendar day, when the
     # baseline falls behind day_start and stops applying.
-    realised, _peak = day_pnl_and_peak(_daily_loss_window_start())
+    #
+    # Only a LOSS before the resume is forgiven; a profit still cushions the
+    # day. +$37.87, Resume, -$63.84 is a day at -$25.97, not -$63.84 (owner,
+    # 2026-10-08). The mirror of `daily_goal.goal_figure`.
+    window, _peak = day_pnl_and_peak(_daily_loss_window_start())
+    day, _peak = day_pnl_and_peak(calendar_day_start_ts())
+    realised = window + max(day - window, 0.0)
     day_base = balance - realised
     if day_base <= 0:
         return None
@@ -468,7 +486,7 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
 
 
 def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:
-    """Stop for the rest of the broker day on the daily-loss limit.
+    """Stop for the rest of the Calendar day on the daily-loss limit.
 
     Runs regardless of risk_governor_enabled, for the same reason the
     give-back guard does -- see apply_giveback_guard_on_close.
@@ -478,17 +496,17 @@ def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:
         return
     if is_trading_paused():
         return
-    until = rg_day_start_ts() + 86400.0
+    until = calendar_day_start_ts() + 86400.0
     with db_module.db():
         db_module.set_app_config("trade_pause_until", str(until))
         db_module.set_app_config("risk_halt_reason", reason)
-    log.warning("[RG] %s — trading stopped until the next broker day", reason)
+    log.warning("[RG] %s — trading stopped until the day ends (00:00 UTC)", reason)
 
 
 def _daily_loss_window_start() -> float:
-    """Where the daily loss ceiling starts counting: the broker day, or the
+    """Where the daily loss ceiling starts counting: the Calendar day, or the
     last manual resume if that came later."""
-    day_start = rg_day_start_ts()
+    day_start = calendar_day_start_ts()
     try:
         baseline = float(db_module.get_app_config("daily_loss_baseline_ts") or 0)
     except (TypeError, ValueError):

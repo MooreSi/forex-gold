@@ -408,6 +408,39 @@ only, every source.
   day). Pinned by `tests/risk/test_daily_goal_resume_keeps_loss.py`. The
   header's figure is still the whole day, so after resuming past a reached
   goal it shows more than the halt counts.
+- **The goal's day is the Calendar's day, 00:00 UTC, not the broker day
+  (2026-10-08, owner).** The halt secured "+$26.15 vs $23.80" at 02:00 BST
+  while the header read "$24.10 / $18.51": both were MT5's closes, but the
+  halt counted from the broker rollover (22:00 BST) and the header and the
+  Calendar file a close by its UTC date, so +$7.64 closed at 23:05-23:07 BST
+  was in one and not the other. `daily_goal._goal_day_start()` is now 00:00
+  UTC of today's UTC date (not the trading clock's date, which is a day ahead
+  between 00:00 and 01:00 BST and would start a day that has not begun), and
+  the halt it writes lasts until that day ends (01:00 BST), not the broker
+  rollover, or it would lift at 22:00 and be re-written on the next sweep.
+  The daily-loss and give-back guards still use the broker day. Pinned by
+  `tests/risk/test_daily_goal_calendar_day.py`. Between 00:00 and 01:00 BST
+  the header (trading-clock date) shows the new day while the goal still
+  counts the old UTC day.
+- **The daily-loss limit forgives a pre-Resume loss, never a pre-Resume
+  profit (2026-10-08, owner).** +$37.87 by 13:35, Resume (from the goal's
+  halt), -$63.84 after: the day was -$25.97 on MT5 and the header read
+  -$33.61, yet it halted on "$-63.84 today vs -$63.28 (10.0% of $632.84)".
+  The local table matched MT5 to the cent; the window started at the Resume.
+  `check_daily_loss_limit` now counts the window plus any PROFIT earlier in
+  the broker day, the mirror of `daily_goal.goal_figure`. Resuming after
+  this limit fires still restarts it (a loss before the Resume is still
+  forgiven). Pinned by `tests/risk/test_daily_loss_resume_keeps_profit.py`.
+  Still the local table, not MT5 like the goal: it runs inside
+  `record_close`, which has no bridge (the two matched to the cent that day).
+- **The daily-loss limit's day is the Calendar's day too (2026-10-08,
+  owner).** `governor.calendar_day_start_ts()` (00:00 UTC today) is the one
+  definition; `daily_goal._goal_day_start` returns it. `check_daily_loss_limit`
+  counts from it and `apply_daily_loss_halt_on_close` halts until it ends
+  (01:00 BST). The give-back guard and the governor's own `rg_check_halt`
+  daily-loss branch (only with `risk_governor_enabled`, off on this account)
+  still use the broker day. Tests' `_closes` default clamps to the later of
+  the two day starts. Pinned by `tests/risk/test_daily_loss_calendar_day.py`.
 - **There are now two daily profit targets.** Trading > Schedule's
   `trading_schedule_daily_target` is dollars only, applies only while the
   trading schedule is on, and refuses at the entry gate rather than pausing.

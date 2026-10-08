@@ -56,7 +56,9 @@ def _closes(pnls, day_start=None, at=None):
     # the 21:00 UTC rollover, "two minutes ago" is YESTERDAY, the closes fall
     # outside the window and 18 tests across four files failed (a full run
     # crossing 22:00 BST, 2026-10-07). One second into the day is still before
-    # any re-arm a test makes at `time.time()`.
+    # any re-arm a test makes at `time.time()`. The daily goal and the
+    # daily-loss limit count from the Calendar day (00:00 UTC) instead, so the
+    # same applies after that rollover: never before the later of the two.
     #
     # Rows are a millisecond apart, not a second: `_seq` runs across the whole
     # file, so whole-second steps had walked a hundred-odd seconds past `base`
@@ -66,7 +68,8 @@ def _closes(pnls, day_start=None, at=None):
     elif at is not None:
         base = at
     else:
-        base = max(time.time() - 120, rg.rg_day_start_ts() + 1)
+        base = max(time.time() - 120, rg.rg_day_start_ts() + 1,
+                   rg.calendar_day_start_ts() + 1)
     with db.db() as conn:
         for p in pnls:
             i = _seq[0]; _seq[0] += 1
@@ -340,12 +343,14 @@ def test_zero_disables_it(fresh_db):
     assert rg.check_daily_loss_limit({"max_daily_loss_pct": 0}, balance=100.0) is None
 
 
-def test_applying_it_halts_until_the_next_broker_day(fresh_db):
+def test_applying_it_halts_until_the_calendar_day_ends(fresh_db):
+    """The Calendar's day, 00:00 UTC, since 2026-10-08 (owner); it was the
+    broker day."""
     _closes([-40])
     rg.apply_daily_loss_halt_on_close(DL, balance=960.0)
     assert rg.is_trading_paused() is True
     assert float(db.get_app_config("trade_pause_until")) == pytest.approx(
-        rg.rg_day_start_ts() + 86400.0)
+        rg.calendar_day_start_ts() + 86400.0)
     assert "Daily loss limit" in (db.get_app_config("risk_halt_reason") or "")
 
 

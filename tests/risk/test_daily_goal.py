@@ -130,7 +130,7 @@ def test_applying_writes_the_pause_every_daily_halt_uses(fresh_db):
     assert dg.apply_daily_goal(_rs("usd", 100.0), balance=None) is True
     assert rg.is_trading_paused()
     until = float(db.get_app_config("trade_pause_until"))
-    assert until == pytest.approx(rg.rg_day_start_ts() + 86400.0)
+    assert until == pytest.approx(dg._goal_day_start() + 86400.0)
     assert "Daily goal" in rg.halt_reason()
 
 
@@ -348,7 +348,7 @@ def test_reached_with_nothing_open_is_secured_for_the_day(fresh_db):
     _sweep(_PosBridge(10_150.0, 0), _rs("usd", 100.0))
     assert rg.halt_reason().startswith("Daily goal secured")
     assert float(db.get_app_config("trade_pause_until")) == pytest.approx(
-        rg.rg_day_start_ts() + 86400.0)
+        dg._goal_day_start() + 86400.0)
 
 
 def test_the_hold_becomes_the_days_halt_when_the_last_trade_closes_above(fresh_db):

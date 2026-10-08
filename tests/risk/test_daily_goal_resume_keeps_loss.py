@@ -43,7 +43,7 @@ class _Bridge:
 
 def _mt5(monkeypatch, before_resume, since_resume):
     """MT5's realised from the day's start, and from the Resume."""
-    day_start = rg.rg_day_start_ts()
+    day_start = dg._goal_day_start()
 
     async def fake(engine, since_ts):
         if since_ts <= day_start:

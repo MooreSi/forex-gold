@@ -53,6 +53,9 @@ def lab(monkeypatch):
     monkeypatch.setattr(ts, "_daily_target_state", lambda: dict(state["target"]))
     monkeypatch.setattr(ts, "_news_state", lambda: dict(state["news"]))
     monkeypatch.setattr(ts, "_halt_reason", lambda: state["halt_reason"])
+    # The Trading Markets gate reads the wall clock; the session state has
+    # its own tests in test_badge_reports_markets_off.py.
+    monkeypatch.setattr(ts, "_session_state", lambda: (True, "london"))
     monkeypatch.setattr(ts.time, "time", lambda: _NOW)
     return state
 
@@ -259,7 +262,7 @@ class TestTheRealWiring:
         out = ts.badge()
 
         assert out["state"] in {"ok", "halted", "profit_target",
-                                "news_blackout", "unknown"}
+                                "session_closed", "news_blackout", "unknown"}
         assert set(out) == {"state", "label", "detail", "until",
                             "resume_ts", "can_resume"}
 

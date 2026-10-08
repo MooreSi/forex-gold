@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Ban, HelpCircle, Newspaper, Shield, Trophy } from "lucide-react";
+import { Ban, Clock, HelpCircle, Newspaper, Shield, Trophy } from "lucide-react";
 import { TradingStatusDialog } from "./TradingStatusDialog";
 import type { TradingStatus } from "./TradingStatusDialog";
 import { api } from "@/api/client";
@@ -26,6 +26,7 @@ const LOOK: Record<string, { Icon: typeof Shield; className: string }> = {
   halted: { Icon: Ban, className: "text-loss" },
   profit_target: { Icon: Trophy, className: "text-accent" },
   news_blackout: { Icon: Newspaper, className: "text-warning" },
+  session_closed: { Icon: Clock, className: "text-warning" },
   unknown: { Icon: HelpCircle, className: "text-ink-3" },
 };
 

@@ -14,8 +14,16 @@ three is a true statement that would be misleading on its own:
                       held for the rest of it. Below a halt (that is a loss
                       guard, this is a win), above a blackout (that lifts
                       itself, this needs a Resume).
-3. `news_blackout` -- entries held for a news window, which lifts itself.
-4. `ok`            -- nothing is holding anything.
+3. `session_closed` -- the Trading Markets toggles refuse the session that
+                      is live now (or it is the weekend, or 21:00-24:00 UTC,
+                      which no toggle covers). Below the target (that needs a
+                      Resume, this does not) and above a blackout (a blackout
+                      lifting would not resume trading while this holds).
+                      Added 2026-10-08: London and New York switched off
+                      during the overlap left the badge reading "Trading
+                      Active" while `is_session_allowed` refused every entry.
+4. `news_blackout` -- entries held for a news window, which lifts itself.
+5. `ok`            -- nothing is holding anything.
 
 `ok` is reachable only when none of the others apply. A badge saying so while
 every entry is being held is a false all-clear, which is the complaint that put
@@ -79,6 +87,41 @@ def _trade_pause_until() -> float:
 def _daily_target_state() -> dict:
     from backend.src.services.risk.schedule import daily_profit_target_state
     return daily_profit_target_state()
+
+
+def _session_state() -> tuple[bool, str]:
+    """The Trading Markets gate itself, so the badge and the gate that
+    refuses the order cannot disagree."""
+    from backend.src.services.risk.risk_settings_repo import is_session_allowed
+    allowed, name = is_session_allowed()
+    return bool(allowed), str(name)
+
+
+_SESSION_NAMES = {
+    "asian": "Asia",
+    "london": "London",
+    "overlap": "London/New York overlap",
+    "ny": "New York",
+}
+
+
+def _session_closed(name: str) -> dict:
+    if name == "closed":
+        label, detail = ("Market Closed",
+                         "The forex market is closed for the weekend.")
+    elif name == "off":
+        label, detail = ("Outside Trading Hours",
+                         "21:00-24:00 UTC is not covered by any Trading "
+                         "Markets session, so automated entries are held.")
+    else:
+        label = "Session Switched Off"
+        detail = (f"The {_SESSION_NAMES.get(name, name)} session is switched "
+                  f"off in Trading Markets (Trading > Schedule), so automated "
+                  f"entries are held until an enabled session opens.")
+    return {"state": "session_closed", "label": label, "detail": detail,
+            "until": None, "resume_ts": None,
+            # resume_all clears none of the toggles.
+            "can_resume": False}
 
 
 def _news_state() -> dict:
@@ -261,6 +304,10 @@ def badge() -> dict:
                        f"— automated entries are held for the rest of today."),
             "until": None, "resume_ts": None, "can_resume": True,
         }
+
+    allowed, session = _safe(_session_state, (True, ""))
+    if not allowed:
+        return _session_closed(session)
 
     news = _safe(_news_state, {"paused": False})
     if news.get("paused"):

@@ -63,6 +63,20 @@ describe("TradingStatusBadge", () => {
     expect(await screen.findByText(/News Blackout/)).toBeInTheDocument();
   });
 
+  it("shows a switched-off session as a hold, not as an unknown", async () => {
+    // 2026-10-08: London and New York off read "Trading Active". The backend
+    // now says why; the badge must not render it in the grey of "unknown".
+    mockBadge({
+      state: "session_closed", label: "Session Switched Off",
+      detail: "The London/New York overlap session is switched off.",
+      until: null, resume_ts: null, can_resume: false,
+    });
+    render(<TradingStatusBadge />);
+    await screen.findByText("Session Switched Off");
+
+    expect(screen.getByTestId("trading-status-badge")).toHaveClass("text-warning");
+  });
+
   it("offers a Resume when one would do something", async () => {
     mockBadge(HALTED);
     render(<TradingStatusBadge />);

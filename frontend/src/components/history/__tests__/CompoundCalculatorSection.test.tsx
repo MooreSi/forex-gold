@@ -198,3 +198,103 @@ describe("the chart", () => {
     expect(screen.getByTestId("cc-line-goal").getAttribute("d")).not.toBe(linear);
   });
 });
+
+describe("losing days", () => {
+  // Owner, 2026-10-08: a goal hit every day is not what an account does, so
+  // some days a week lose the max daily drawdown, and the figures net it.
+  it("offers a max daily drawdown up to 20%, and losing days up to the trading days", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    expect(screen.getByLabelText("Max daily drawdown (%) slider")).toHaveAttribute("max", "20");
+    expect(screen.getByLabelText("Losing days per week slider")).toHaveAttribute("max", "5");
+
+    setField("Trading days per week", "3");
+
+    expect(screen.getByLabelText("Losing days per week slider")).toHaveAttribute("max", "3");
+  });
+
+  it("nets the losing days into the final balance", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    setField("Losing days per week", "1");
+    setField("Max daily drawdown (%)", "2");
+
+    const week = 1.01 ** 4 * 0.98;
+    expect(screen.getByTestId("cc-final")).toHaveTextContent(formatMoney(1000 * week ** 52));
+    expect(screen.getByTestId("cc-profit")).toHaveTextContent(formatMoney(1000 * week ** 52 - 1000));
+  });
+
+  it("keeps the losing days in the half-goal line", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    setField("Losing days per week", "1");
+    setField("Max daily drawdown (%)", "1");
+
+    expect(screen.getByTestId("cc-half")).toHaveTextContent(formatMoney(1000 * (1.005 ** 4 * 0.99) ** 52));
+  });
+
+  it("shows the loss and the net in the table and the totals only when there are losing days", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+    const table = () => within(screen.getByRole("table"));
+    expect(table().queryByText("Loss")).toBeNull();
+    expect(screen.queryByTestId("cc-loss")).toBeNull();
+
+    setField("Losing days per week", "2");
+
+    expect(table().getByText("Loss")).toBeInTheDocument();
+    expect(table().getByText("Net")).toBeInTheDocument();
+    expect(screen.getByTestId("cc-loss")).toBeInTheDocument();
+  });
+
+  it("says how many winning days a week break even", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+    expect(screen.queryByTestId("cc-break-even")).toBeNull();
+
+    setField("Losing days per week", "2");
+    setField("Max daily drawdown (%)", "2");
+
+    expect(screen.getByTestId("cc-break-even")).toHaveTextContent(/4 winning days a week/);
+    expect(screen.getByTestId("cc-break-even")).toHaveTextContent("1.36%");
+  });
+
+  it("says a plan that loses money never doubles", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    setField("Losing days per week", "2");
+    setField("Max daily drawdown (%)", "2");
+
+    expect(screen.getByText("Never")).toBeInTheDocument();
+  });
+
+  it("draws the net per week, with a losing week below the line", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    setField("Losing days per week", "2");
+    setField("Max daily drawdown (%)", "2");
+
+    const week = screen.getByRole("img", { name: "Projected net profit per week" });
+    expect(week.querySelectorAll("rect[data-sign=loss]")).toHaveLength(52);
+  });
+
+  it("refuses more losing days than trading days", () => {
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    setField("Losing days per week", "4");
+    setField("Trading days per week", "3");
+
+    expect(screen.queryByTestId("cc-final")).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent(/losing days/i);
+  });
+
+  it("remembers the drawdown and the losing days between visits", () => {
+    const first = render(<CompoundCalculatorSection balance={1000} />);
+    setField("Losing days per week", "2");
+    setField("Max daily drawdown (%)", "3.5");
+    first.unmount();
+
+    render(<CompoundCalculatorSection balance={1000} />);
+
+    expect(screen.getByLabelText("Losing days per week")).toHaveValue(2);
+    expect(screen.getByLabelText("Max daily drawdown (%)")).toHaveValue(3.5);
+  });
+});

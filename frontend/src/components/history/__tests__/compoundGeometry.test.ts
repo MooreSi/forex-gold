@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { axisMoney, buildBalanceChart, logTicks } from "../internal/compoundGeometry";
+import { axisMoney, buildBalanceChart, buildBars, logTicks } from "../internal/compoundGeometry";
 
 /**
  * The Compound Calculator chart's axes.
@@ -58,5 +58,20 @@ describe("buildBalanceChart", () => {
     const g = buildBalanceChart(series, [1, 2, 3], false);
 
     expect(g.xTicks.map((t) => t.label)).toEqual(["M1", "M2", "M3"]);
+  });
+});
+
+describe("the profit bars", () => {
+  it("hangs a losing period below the zero line and a winning one above it", () => {
+    const chart = buildBars([100, -50], "Week");
+    const zero = chart.yTicks.find((t) => t.value === 0)!.y;
+    const [win, loss] = chart.bars;
+
+    expect(win.y + win.h).toBeCloseTo(zero, 6);
+    expect(loss.y).toBeCloseTo(zero, 6);
+    expect(loss.h).toBeCloseTo(win.h / 2, 6);
+    // Inside the chart, not drawn off its bottom edge.
+    expect(loss.y + loss.h).toBeLessThanOrEqual(chart.box.h);
+    expect(chart.yTicks.some((t) => t.value < 0)).toBe(true);
   });
 });

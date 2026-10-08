@@ -716,8 +716,20 @@ take profit when there is one.
   days, which is why the monthly % alternates (24.47% / 23.24% at 1% a day).
   That is the model, not a bug.
 - It always draws the same plan at **half the goal** beside it, and says it
-  assumes no losing days, spread, commission, swap or tax. Keep both: a line
-  that only goes up is the best case by construction.
+  leaves out spread, commission, swap and tax. Keep both: a line that only
+  goes up is the best case by construction.
+- **Losing days** (owner, 2026-10-08): a max daily drawdown (slider to 20%)
+  and a number of losing days per week (0 to the trading days). Losing days
+  REPLACE winning days, fall at the END of each week (the balance is highest
+  there, so each loss is largest), and lose the full drawdown as a percent of
+  that day's balance. A loss comes out of the balance in full; "profit
+  reinvested" applies to winning days only. The half-goal line keeps the same
+  losses. With losses set, the monthly % runs in a three-month cycle
+  (-2.2 / -3.2 / -7.9% at 1% goal, 2 x 2%): a month is 4.33 weeks, so some
+  months hold one more week-end of losses. That is the model, not a bug.
+- **"Doubles in" counts the day the balance reaches 2x and stays there**, not
+  the first touch: with end-of-week losses a balance can touch 2x mid-week
+  and close the week under it. A week that nets a loss shows "Never".
 - Arithmetic in `history/internal/compoundMath.ts` and `compoundGeometry.ts`,
   each with its own test file.
 - **The charts are drawn at their measured width and a fixed pixel height**

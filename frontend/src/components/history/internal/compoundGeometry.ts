@@ -148,17 +148,23 @@ export interface Bars {
   box: Box;
 }
 
-/** One bar per period, for the profit-per-week or per-month chart. */
+/**
+ * One bar per period, for the profit-per-week or per-month chart. A losing
+ * period hangs below the zero line.
+ */
 export function buildBars(values: number[], prefix: string, box: Box = BAR_BOX): Bars {
   const { w: BAR_W, h: BAR_H } = box;
   const hi = Math.max(0, ...values);
-  const ticks = niceTicks(0, hi);
-  const top = Math.max(hi, ...ticks) || 1;
+  const lo = Math.min(0, ...values);
+  const ticks = niceTicks(lo, hi);
+  const top = Math.max(hi, ...ticks);
+  const bottom = Math.min(lo, ...ticks);
+  const span = top - bottom || 1;
   const plotW = BAR_W - BAR_M.left - BAR_M.right;
   const plotH = BAR_H - BAR_M.top - BAR_M.bottom;
   const slot = plotW / Math.max(values.length, 1);
   const w = Math.max(1, slot * 0.72);
-  const y = (v: number) => BAR_M.top + ((top - v) / top) * plotH;
+  const y = (v: number) => BAR_M.top + ((top - v) / span) * plotH;
   return {
     plot: { left: BAR_M.left, right: BAR_W - BAR_M.right },
     box,

@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import type { CompoundCalculator, FieldName } from "../hooks/useCompoundCalculator";
 
 /**
- * The calculator's six inputs, each a slider with a box beside it.
+ * The calculator's eight inputs, each a slider with a box beside it.
  *
  * The slider is for feel -- drag the goal and watch the curve bend. The box is
  * for an exact figure, and it is the one that is authoritative: it can hold a
@@ -84,6 +84,9 @@ function capitalMax(balance: number | null): number {
 export function CompoundInputsForm({ c, balance }: {
   c: CompoundCalculator; balance: number | null;
 }) {
+  // Losing days are some of the trading days, so their slider stops there.
+  const days = c.inputs.daysPerWeek;
+  const tradingDays = Number.isInteger(days) && days >= 1 && days <= 7 ? days : 7;
   const specs: Spec[] = [
     { name: "capital", label: "Starting capital", min: 100, max: capitalMax(balance), step: 100,
       prefix: "$", hint: "What the account starts with." },
@@ -97,6 +100,10 @@ export function CompoundInputsForm({ c, balance }: {
       hint: "Share of each day's profit left in the account. The rest is taken out and stops compounding." },
     { name: "monthlyDeposit", label: "Monthly deposit", min: 0, max: 5000, step: 50, prefix: "$",
       hint: "Paid in at the end of every month." },
+    { name: "drawdownPct", label: "Max daily drawdown (%)", min: 0.05, max: 20, step: 0.05, unit: "%",
+      hint: "Lost on each losing day, as a percent of that day's balance. The dollar figure moves with the account." },
+    { name: "losingDays", label: "Losing days per week", min: 0, max: tradingDays, step: 1,
+      hint: "How many of each week's trading days hit the max daily drawdown. They fall at the end of the week." },
   ];
 
   return (

@@ -7,7 +7,7 @@ import type { Period, Projection } from "./compoundMath";
 /**
  * The table the profit charts are drawn from, a row per month or per week.
  *
- * "Taken out" and "Paid in" appear only when there is some. Two columns of
+ * "Loss", "Net", "Taken out" and "Paid in" appear only when there is some. Two columns of
  * $0.00 on every row are noise that pushes the columns that matter off a
  * narrow screen.
  */
@@ -23,6 +23,7 @@ export function CompoundBreakdownSection({ projection, capital, view, onView }: 
 }) {
   const rows: Period[] = view === "months" ? projection.months : projection.weeks;
   const noun = view === "months" ? "Month" : "Week";
+  const showLoss = projection.totalLoss > 0;
   const showOut = projection.totalWithdrawn > 0;
   const showIn = projection.totalDeposited > 0;
 
@@ -53,7 +54,8 @@ export function CompoundBreakdownSection({ projection, capital, view, onView }: 
         <table className="w-full text-[11px]">
           <thead className="sticky top-0 bg-surface-2 text-ink-3">
             <tr>
-              {[noun, "Start", "Profit", "Profit %",
+              {[noun, "Start", "Profit", ...(showLoss ? ["Loss", "Net"] : []),
+                showLoss ? "Net %" : "Profit %",
                 ...(showOut ? ["Taken out"] : []), ...(showIn ? ["Paid in"] : []),
                 "End", "vs start"].map((h, i) => (
                 <th key={h} className={cn("px-2 py-1.5 font-medium", i === 0 ? "text-left" : "text-right")}>
@@ -68,7 +70,13 @@ export function CompoundBreakdownSection({ projection, capital, view, onView }: 
                 <td className="px-2 py-1 text-left text-ink-2">{noun} {r.index}</td>
                 <td className="px-2 py-1 text-right text-ink-2">{money(r.start)}</td>
                 <td className="px-2 py-1 text-right text-profit">{money(r.gain)}</td>
-                <td className="px-2 py-1 text-right text-profit">{formatPercent(r.gainPct, 2)}</td>
+                {showLoss && <td className="px-2 py-1 text-right text-loss">{money(r.loss)}</td>}
+                {showLoss && <td className={cn("px-2 py-1 text-right", r.net < 0 ? "text-loss" : "text-profit")}>
+                  {money(r.net)}
+                </td>}
+                <td className={cn("px-2 py-1 text-right", r.netPct < 0 ? "text-loss" : "text-profit")}>
+                  {formatPercent(r.netPct, 2)}
+                </td>
                 {showOut && <td className="px-2 py-1 text-right text-warning">{money(r.withdrawn)}</td>}
                 {showIn && <td className="px-2 py-1 text-right text-ink-2">{money(r.deposit)}</td>}
                 <td className="px-2 py-1 text-right font-semibold text-ink-1">{money(r.end)}</td>

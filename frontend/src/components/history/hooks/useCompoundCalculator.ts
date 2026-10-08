@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  project, rateEquivalents, type CompoundInputs,
+  breakEven, project, rateEquivalents, type CompoundInputs,
 } from "../internal/compoundMath";
 
 /**
- * The Compound Calculator's state: six boxes, and what they project to.
+ * The Compound Calculator's state: eight boxes, and what they project to.
  *
  * The boxes hold STRINGS, not numbers. A number state turns a half-typed
  * "0." into 0 and a cleared box into 0, and the owner watches the box they
@@ -20,10 +20,11 @@ export type FieldName = keyof CompoundInputs;
 const STORAGE_KEY = "analysis.compound-calculator";
 const REMEMBERED: FieldName[] = [
   "dailyPct", "daysPerWeek", "months", "reinvestPct", "monthlyDeposit",
+  "drawdownPct", "losingDays",
 ];
 const DEFAULTS: Record<FieldName, string> = {
   capital: "10000", dailyPct: "1", daysPerWeek: "5", months: "12",
-  reinvestPct: "100", monthlyDeposit: "0",
+  reinvestPct: "100", monthlyDeposit: "0", drawdownPct: "2", losingDays: "0",
 };
 
 function load(): Partial<Record<FieldName, string>> {
@@ -64,6 +65,12 @@ function problem(i: CompoundInputs): string | null {
   if (!Number.isFinite(i.monthlyDeposit) || i.monthlyDeposit < 0) {
     return "The monthly deposit cannot be negative.";
   }
+  if (!Number.isFinite(i.drawdownPct) || i.drawdownPct < 0 || i.drawdownPct >= 100) {
+    return "The max daily drawdown is a percentage from 0 to below 100.";
+  }
+  if (!Number.isInteger(i.losingDays) || i.losingDays < 0 || i.losingDays > i.daysPerWeek) {
+    return "Losing days per week is a whole number from 0 to the trading days per week.";
+  }
   return null;
 }
 
@@ -96,14 +103,24 @@ export function useCompoundCalculator(balance: number | null) {
     months: parse(fields.months),
     reinvestPct: parse(fields.reinvestPct),
     monthlyDeposit: parse(fields.monthlyDeposit),
+    drawdownPct: parse(fields.drawdownPct),
+    losingDays: parse(fields.losingDays),
   }), [fields]);
 
   const projection = useMemo(() => project(inputs), [inputs]);
-  // The same months at half the goal: the reality check drawn beside it.
+  // The same months at half the goal, and the same losing days: the reality
+  // check drawn beside it.
   const half = useMemo(
     () => project({ ...inputs, dailyPct: inputs.dailyPct / 2 }), [inputs]);
   const rates = useMemo(
-    () => (projection ? rateEquivalents(inputs.dailyPct, inputs.daysPerWeek) : null),
+    () => (projection
+      ? rateEquivalents(inputs.dailyPct, inputs.daysPerWeek, inputs.drawdownPct, inputs.losingDays)
+      : null),
+    [projection, inputs]);
+  const even = useMemo(
+    () => (projection && inputs.losingDays > 0
+      ? breakEven(inputs.dailyPct, inputs.daysPerWeek, inputs.drawdownPct, inputs.losingDays)
+      : null),
     [projection, inputs]);
 
   return {
@@ -114,6 +131,7 @@ export function useCompoundCalculator(balance: number | null) {
     projection,
     half,
     rates,
+    even,
     logScale,
     setLogScale,
     view,

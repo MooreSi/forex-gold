@@ -19,6 +19,11 @@ concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
 
+# Checkout and artifact upload are all this needs; nothing here writes to the
+# repo, so the token is read-only (code scanning: missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   checks:
     # Windows to match the dev + production environment (MetaTrader5 is a win32

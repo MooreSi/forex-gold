@@ -22,7 +22,6 @@ being slow or fast, so the tie is guaranteed on every platform.
 """
 from __future__ import annotations
 
-import tempfile
 
 import pytest
 
@@ -45,9 +44,9 @@ ENGINES = [
 ]
 
 
-def _make(repo, create_name, build_row, n=3):
+def _make(repo, create_name, build_row, db_path, n=3):
     """Insert n rows that all carry the SAME created_at, newest last."""
-    repo.init(tempfile.mktemp(suffix=".db"))
+    repo.init(str(db_path))
     ids = []
     for i in range(n):
         row = build_row(f"s{i}")
@@ -59,8 +58,8 @@ def _make(repo, create_name, build_row, n=3):
 
 
 @pytest.mark.parametrize("repo,create_name,build_row", ENGINES)
-def test_tied_timestamps_still_order_newest_first(repo, create_name, build_row):
-    ids = _make(repo, create_name, build_row)
+def test_tied_timestamps_still_order_newest_first(repo, create_name, build_row, tmp_path):
+    ids = _make(repo, create_name, build_row, tmp_path / "signals.db")
     rows = repo.get_all_signals(limit=2)
 
     assert len(rows) == 2
@@ -71,9 +70,9 @@ def test_tied_timestamps_still_order_newest_first(repo, create_name, build_row):
 
 
 @pytest.mark.parametrize("repo,create_name,build_row", ENGINES)
-def test_the_limit_keeps_the_newest_rows_not_an_arbitrary_two(repo, create_name, build_row):
+def test_the_limit_keeps_the_newest_rows_not_an_arbitrary_two(repo, create_name, build_row, tmp_path):
     """A LIMIT over a total tie must not drop the newest row."""
-    ids = _make(repo, create_name, build_row, n=5)
+    ids = _make(repo, create_name, build_row, tmp_path / "signals.db", n=5)
     rows = repo.get_all_signals(limit=2)
 
     assert ids[-1] in [r["id"] for r in rows], (

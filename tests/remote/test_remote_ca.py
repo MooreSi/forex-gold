@@ -201,6 +201,7 @@ import threading
 def _serve_once(cert_path, key_path, ready, result):
     """A one-shot TLS server. Records whether the handshake completed."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(str(cert_path), str(key_path))
     sock = socket.socket()
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

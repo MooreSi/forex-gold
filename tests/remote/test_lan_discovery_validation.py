@@ -58,6 +58,7 @@ def https_404_server(certs):
     port = _free_port()
     httpd = http.server.HTTPServer(("127.0.0.1", port), _NotOurServer)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(str(cert_file), str(key_file))
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -73,6 +74,7 @@ def real_ws_server(certs):
     cert_file, key_file = certs
     port = _free_port()
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(str(cert_file), str(key_file))
     holder = {}
 

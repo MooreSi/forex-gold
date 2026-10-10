@@ -217,6 +217,7 @@ class TestSslContexts:
             serialization.NoEncryption()))
 
         sctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        sctx.minimum_version = _ssl.TLSVersion.TLSv1_2
         sctx.load_cert_chain(str(cp), str(kp))
         sock = socket.socket(); sock.bind(("127.0.0.1", 0)); sock.listen(1)
         port = sock.getsockname()[1]

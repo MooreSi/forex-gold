@@ -13,7 +13,6 @@ of every install that never opted in.
 from __future__ import annotations
 
 import asyncio
-import tempfile
 
 import pytest
 
@@ -23,8 +22,8 @@ from backend.src.services.risk import app_config, retention, settings
 
 
 @pytest.fixture
-def db(monkeypatch):
-    db_module.init(tempfile.mktemp(suffix=".db"))
+def db(monkeypatch, tmp_path):
+    db_module.init(str(tmp_path / "settings.db"))
     # get_risk_settings caches for 10s; clear it so each test sees its own writes.
     monkeypatch.setattr(db_module, "_rs_cache", None, raising=False)
     monkeypatch.setattr(db_module, "_rs_cache_ts", 0.0, raising=False)

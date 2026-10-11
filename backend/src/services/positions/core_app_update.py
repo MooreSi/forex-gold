@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 from backend.src.services.ai import provider as ai_provider
 from backend.src.services.positions.core_git_exe import git_exe as _git_exe
+from backend.src.services.positions.core_update_set_aside import set_aside as _set_aside
 from backend.src.utils.os_utils import repo_root as _repo_root
 
 log = logging.getLogger(__name__)
@@ -713,13 +714,10 @@ async def apply_update(restart: bool = True) -> dict:
     machine has no .git at all until its first update.
 
     Uses `checkout -B <branch> --track origin/<branch> -f` rather than
-    `pull --ff-only`: no client machine is meant to carry independent local
-    commits, each one just mirrors origin, so forcing the working tree to
-    match origin exactly is the correct, expected outcome regardless of any
-    local drift -- not data loss. (Verified this handles both a from-empty
-    bootstrap and an already-dirty existing checkout identically, discarding
-    the dirty file and landing cleanly on origin's HEAD either way.)
-    Anything a client actually needs to keep -- config.yaml, the licence
+    `pull --ff-only`, so a drifted client still lands on origin exactly. Edits
+    to tracked files are put in `git stash` first: on 2026-10-11 the force
+    discarded three sessions of the owner's uncommitted work (see
+    core_update_set_aside). Anything a client actually needs to keep -- config.yaml, the licence
     store, .venv, the DB -- is already gitignored and untouched by this.
 
     Restarts on success (both a clean run and one where the post-update pip
@@ -750,7 +748,9 @@ async def apply_update(restart: bool = True) -> dict:
     rc, out, err = await _run_git("fetch", "origin", _BRANCH)
     if rc != 0:
         return {"ok": False, "error": (err.strip() or out.strip() or "git fetch failed")[:300]}
-
+    refused = await asyncio.get_running_loop().run_in_executor(None, _set_aside, _REPO_ROOT)
+    if refused:
+        return {"ok": False, "error": refused}
     rc, out, err = await _run_git("checkout", "-B", _BRANCH, "--track", f"origin/{_BRANCH}", "-f")
     if rc != 0:
         return {"ok": False, "error": (err.strip() or out.strip() or "git checkout failed")[:300]}

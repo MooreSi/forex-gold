@@ -3,7 +3,7 @@ import { formatClock } from "@/components/shared/format";
 import { asArray } from "@/lib/asArray";
 import { useMarketResearch } from "@/components/ai/hooks/useMarketResearch";
 import type { Candle } from "@/api/types";
-import { DASHBOARD_DAYS, useDashboardController } from "./hooks/useDashboardController";
+import { useDashboardController } from "./hooks/useDashboardController";
 import { AiInsightsCard } from "./internal/AiInsightsCard";
 import { AutomationCard } from "./internal/AutomationCard";
 import { BrainCard } from "./internal/BrainCard";
@@ -85,10 +85,14 @@ export function DashboardPanel() {
             connection states do not fit a third of a laptop screen. */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:col-span-12 xl:grid-cols-12">
           <div className="xl:col-span-4">
-            <PerformanceCard performance={c.performance} days={DASHBOARD_DAYS} />
+            <PerformanceCard
+              performance={c.performance}
+              range={c.range.current}
+              onWindow={c.range.choose}
+            />
           </div>
           <div className="xl:col-span-3">
-            <EquityCard poll={c.closed} days={DASHBOARD_DAYS} />
+            <EquityCard poll={c.closed} range={c.range.current} />
           </div>
           <div className="md:col-span-2 xl:col-span-5">
             <RiskExecutionCard risk={c.risk.data ?? {}} header={header} />

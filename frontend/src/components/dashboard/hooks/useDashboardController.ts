@@ -5,10 +5,8 @@ import { useHeaderState } from "@/hooks/useHeaderState";
 import { useChartController } from "@/components/chart/hooks/useChartController";
 import { useClosedTrades } from "@/components/history/hooks/useClosedTrades";
 import { asArray, asObject } from "@/lib/asArray";
+import { useDashboardWindow } from "./useDashboardWindow";
 import type { Candle, HistoryState, NewsState, SetForgetState, Trade } from "@/api/types";
-
-/** The window every figure on this screen is measured over. */
-export const DASHBOARD_DAYS = 30;
 
 /**
  * How often the open positions are re-read, in ms.
@@ -58,6 +56,10 @@ interface ScheduleState {
  * That is also why the tick is taken from `/api/system/header` rather than
  * `/api/chart/tick`: the header payload already carries it.
  *
+ * The performance window is the operator's choice (`useDashboardWindow`).
+ * Its two keys are the Analysis tab's own shapes, so a window both tabs offer
+ * is still one request.
+ *
  * Nothing here is billable. The AI figures are read back from what the AI
  * Analysis tab last produced (`useMarketResearch`, a free GET); this screen
  * has no button that asks a model, on purpose — it is the tab left open all
@@ -66,12 +68,14 @@ interface ScheduleState {
 export function useDashboardController() {
   const header = useHeaderState();
   const chart = useChartController();
-  const closed = useClosedTrades(DASHBOARD_DAYS);
+  const range = useDashboardWindow();
+  const days = range.current.days;
+  const closed = useClosedTrades(days);
 
   const history = usePoll<HistoryState>(
-    `history/state?days=${DASHBOARD_DAYS}`,
+    `history/state?days=${days}`,
     useCallback(
-      () => api.get<HistoryState>(`/api/history/state?days=${DASHBOARD_DAYS}`), []),
+      () => api.get<HistoryState>(`/api/history/state?days=${days}`), [days]),
     15_000,
   );
 
@@ -148,6 +152,7 @@ export function useDashboardController() {
   return useMemo(() => ({
     header,
     chart,
+    range,
     closed,
     history,
     setforget,
@@ -162,6 +167,6 @@ export function useDashboardController() {
     /** For the positions card. These carry the broker's P&L. */
     positions: asArray<Trade>(positions.data),
     performance: asObject(history.data?.performance),
-  }), [header, chart, closed, history, setforget, news, daily, risk,
+  }), [header, chart, range, closed, history, setforget, news, daily, risk,
        signals.data, engines.data, schedule.data, positions.data]);
 }

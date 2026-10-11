@@ -4,6 +4,7 @@ import { formatMoney, pnlColour } from "@/components/shared/format";
 import { asArray } from "@/lib/asArray";
 import type { ClosedTrades, CurvePoint } from "@/components/history/hooks/useClosedTrades";
 import type { PollState } from "@/hooks/usePoll";
+import type { DashboardWindow } from "../hooks/useDashboardWindow";
 import { DashCard, Pill, Reading } from "./DashCard";
 import { sparkPath } from "./dashboardMath";
 
@@ -22,10 +23,13 @@ const H = 72;
  *
  * The full chart — money axis, dated ticks, filled area — is on the Analysis
  * tab. This is the same data through the same poll key, drawn small.
+ *
+ * The window is chosen on the Trading performance card beside it; this card
+ * only names it.
  */
-export function EquityCard({ poll, days }: {
+export function EquityCard({ poll, range }: {
   poll: PollState<ClosedTrades>;
-  days: number;
+  range: DashboardWindow;
 }) {
   const data = poll.data;
   const points = asArray<CurvePoint>(data?.curve?.points);
@@ -39,7 +43,7 @@ export function EquityCard({ poll, days }: {
     <DashCard
       title="Equity curve"
       icon="equity"
-      badge={<Pill>last {days} days</Pill>}
+      badge={<Pill>{range.badge}</Pill>}
       footnote="Realised profit from closed trades, starting at zero — not the account balance."
     >
       {!data ? (

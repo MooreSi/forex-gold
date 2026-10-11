@@ -2,7 +2,9 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import {
   formatPercent, formatSignedMoney, pnlColour,
 } from "@/components/shared/format";
-import { DashCard, Pill, Reading } from "./DashCard";
+import { cn } from "@/lib/cn";
+import { DASHBOARD_WINDOWS, type DashboardWindow } from "../hooks/useDashboardWindow";
+import { DashCard, Reading } from "./DashCard";
 
 function num(source: Record<string, unknown>, key: string): number | null {
   const raw = source[key];
@@ -20,10 +22,14 @@ function num(source: Record<string, unknown>, key: string): number | null {
  * An empty payload means the bridge could not answer, and it renders as
  * "no broker data" rather than as zeros. A zeroed row reads as a flat month
  * that really happened.
+ *
+ * The window buttons live here and move the Equity curve card too (owner,
+ * 2026-10-09). They choose what is SHOWN and nothing else.
  */
-export function PerformanceCard({ performance, days }: {
+export function PerformanceCard({ performance, range, onWindow }: {
   performance: Record<string, unknown>;
-  days: number;
+  range: DashboardWindow;
+  onWindow: (days: number) => void;
 }) {
   const pnl = num(performance, "total_net_pnl");
   const factor = num(performance, "profit_factor");
@@ -32,7 +38,27 @@ export function PerformanceCard({ performance, days }: {
     <DashCard
       title="Trading performance"
       icon="performance"
-      badge={<Pill>last {days} days</Pill>}
+      actions={
+        <div className="flex items-center gap-0.5 rounded bg-surface-2 p-0.5">
+          {DASHBOARD_WINDOWS.map((w) => (
+            <button
+              key={w.days}
+              onClick={() => onWindow(w.days)}
+              aria-pressed={w.days === range.days}
+              aria-label={w.name}
+              title={w.name}
+              className={cn(
+                "num rounded px-1.5 py-0.5 text-[10px] transition-colors",
+                w.days === range.days
+                  ? "bg-accent/20 text-accent"
+                  : "text-ink-3 hover:bg-surface-3 hover:text-ink-2",
+              )}
+            >
+              {w.short}
+            </button>
+          ))}
+        </div>
+      }
       footnote="Closed trades only, from the broker's deal history. Open positions are in the Positions card."
     >
       {Object.keys(performance).length === 0 ? (

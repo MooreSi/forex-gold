@@ -102,6 +102,17 @@ costs what the tabs it summarises cost, and two screens cannot disagree about a
 number. Its tick comes from `/api/system/header`, which already carries one,
 rather than from `/api/chart/tick`.
 
+**The performance window is chosen on the Trading performance card
+(2026-10-09).** 1 day, 1 week, 30 days or all time; the Equity curve card
+follows it and only names it. View-only, so it does not break the "controls
+nothing" rule. Remembered per browser under the `dashboard-window`
+localStorage key (`dashboard/hooks/useDashboardWindow.ts`); a stored value it
+does not offer falls back to 30. **All time is `days=3650`**, the
+`/api/history/*` ceiling (`le=3650`): anything larger is a 422 that the cards
+would show as "no broker data". 7 and 30 are the Analysis tab's own key
+shapes, so a window both tabs show is still one request. Pinned by
+`DashboardWindow.test.tsx`.
+
 **Nothing on it bills a model.** The AI figures are read back from what the AI
 Analysis tab last produced. A screen that bills by being looked at is a screen
 nobody can leave open, and this is the tab left open all day. Three are narrower than their NiceGUI

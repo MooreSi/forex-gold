@@ -89,37 +89,36 @@ def get_hourly_pnl_grid(days: int = 90) -> dict:
 
 # ── Equity curve helpers ──────────────────────────────────────────────────────
 
-def get_equity_drawdown_pct() -> float:
+def get_equity_drawdown_pct(balance: Optional[float] = None) -> float:
     """
-    Current drawdown from peak equity as a fraction [0, 1].
-    Uses the simulation account balance and peak_balance if stored, or
-    derives it from the recent trade P&L history.
-    Returns 0.0 if equity data is unavailable.
+    Current drawdown from the peak-balance watermark as a fraction [0, 1].
+
+    `balance` is the LIVE MetaTrader balance. The watermark is app_config
+    `peak_balance` (bugs/042), set from the live balance on each close, so
+    current has to come from the same source -- the simulation ledger drifts
+    (-$2,342.65 against a $1,457.91 peak on the owner's demo DB, 2026-10-11).
+    Returns 0.0 with no balance, no watermark, or a balance at or above it.
+
+    Until 2026-10-11 this read a `vantage_simulation_account.peak_balance`
+    column that no longer exists, and the error was swallowed, so every ML
+    vector ever stored carries 0 here. No engine passes a balance yet: whether
+    they should is the owner's call (simon-handover/053).
     """
+    if balance is None:
+        return 0.0
     try:
         with db() as conn:
             row = conn.execute(
-                "SELECT balance, peak_balance FROM vantage_simulation_account WHERE id=1"
+                "SELECT value FROM app_config WHERE key='peak_balance'"
             ).fetchone()
-            if row and row["peak_balance"] and float(row["peak_balance"]) > 0:
-                peak = float(row["peak_balance"])
-                bal  = float(row["balance"])
-                dd   = max(0.0, (peak - bal) / peak)
-                return round(min(dd, 1.0), 4)
-            # Fallback: derive from last 50 closed trades
-            rows = conn.execute(
-                "SELECT SUM(profit) as cumulative FROM ("
-                "  SELECT profit FROM vantage_simulated_trades "
-                "  WHERE status='closed' ORDER BY close_time DESC LIMIT 50"
-                ")"
-            ).fetchone()
-            if rows and rows[0]:
-                recent_pnl = float(rows[0])
-                if recent_pnl < 0:
-                    return round(min(abs(recent_pnl) / 1000.0, 1.0), 4)
-    except Exception:
-        pass
-    return 0.0
+    except Exception as exc:
+        log.warning("equity drawdown: cannot read peak_balance: %s", exc)
+        return 0.0
+    peak = float(row[0] or 0) if row else 0.0
+    if peak <= 0:
+        return 0.0
+    dd = max(0.0, (peak - float(balance)) / peak)
+    return round(min(dd, 1.0), 4)
 
 
 # ── Regime detection helper ───────────────────────────────────────────────────

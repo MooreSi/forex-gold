@@ -4,6 +4,7 @@ import { formatPrice, formatUtcTime } from "@/components/shared/format";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { DashCard, Pill, Reading } from "./DashCard";
+import { SESSION_LABEL } from "./MarketSessionView";
 
 interface MarketIntelligenceCardProps {
   setforget: SetForgetState | null;
@@ -13,11 +14,6 @@ interface MarketIntelligenceCardProps {
   markets: Record<string, unknown>;
 }
 
-/** What the backend calls each session, in the words the Trading tab uses. */
-const SESSION_LABEL: Record<string, string> = {
-  asian: "Asia", london: "London", overlap: "London + New York",
-  ny: "New York", closed: "Markets closed", off: "Out of session",
-};
 
 /**
  * The read of the market itself: structure, the instruments, the session and

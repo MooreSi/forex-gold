@@ -6,11 +6,14 @@ import {
 import { asObject } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { dayChange } from "./dashboardMath";
+import { MarketSessionView } from "./MarketSessionView";
 
 interface PriceHeroCardProps {
   tick: Tick | null;
   header: HeaderState | null;
   daily: Candle[];
+  /** `markets` from the schedule payload; `{}` when it has not arrived. */
+  markets?: Record<string, unknown>;
 }
 
 const DASH = "—";
@@ -23,7 +26,7 @@ const DASH = "—";
  * move, and `dayChange` says what it is measured against and why it is an em
  * dash rather than zero when it cannot be measured.
  */
-export function PriceHeroCard({ tick, header, daily }: PriceHeroCardProps) {
+export function PriceHeroCard({ tick, header, daily, markets = {} }: PriceHeroCardProps) {
   const account = asObject(header?.account);
   const change = dayChange(tick?.mid, daily);
   const equity = typeof account["equity"] === "number" ? account["equity"] : null;
@@ -107,7 +110,9 @@ export function PriceHeroCard({ tick, header, daily }: PriceHeroCardProps) {
           </p>
         </div>
 
-        <dl className={cn("relative grid gap-x-5 gap-y-1 text-right",
+        <div className="relative flex flex-col items-end gap-2.5">
+        <MarketSessionView markets={markets} />
+        <dl className={cn("grid gap-x-5 gap-y-1 text-right",
                           goal ? "grid-cols-4" : "grid-cols-3")}>
           {goal && (
             <div data-testid="dash-goal"
@@ -128,6 +133,7 @@ export function PriceHeroCard({ tick, header, daily }: PriceHeroCardProps) {
             hint="Equity minus everything paid in: the account's whole life, including open trades, swap and commission."
           />
         </dl>
+        </div>
       </div>
     </section>
   );

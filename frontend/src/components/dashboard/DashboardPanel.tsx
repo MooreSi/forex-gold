@@ -58,6 +58,7 @@ export function DashboardPanel() {
             tick={header?.tick ?? null}
             header={header}
             daily={asArray<Candle>(c.daily.data)}
+            markets={c.markets}
           />
         </div>
 

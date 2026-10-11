@@ -59,10 +59,15 @@ def test_it_is_a_named_engine_the_screen_shows(tpa):
 
 
 def test_the_wire_order_of_the_first_three_is_untouched():
-    """server_start binds (breakout, bounce, reversal) positionally, and a
-    paired node on an older build would see a fourth shift them."""
-    assert registry.ENGINE_NAMES[:3] == ("breakout", "bounce", "reversal")
-    assert len(registry.all_instances()) == 3
+    """Trend PA is reached by name, never through all_instances(), which
+    remote.py unpacks into server_start.
+
+    CHANGED 2026-10-11 (owner): Bounce's slot left the table with
+    wip/nice-vaughan. The order was only ever unpacked inside one process;
+    every sync message names its engine."""
+    assert registry.ENGINE_NAMES == ("breakout", "reversal")
+    assert len(registry.all_instances()) == 2
+    assert "trend_pa" not in registry.ENGINE_NAMES
 
 
 def test_a_mode_switch_starts_it_with_the_others(tpa, monkeypatch):
@@ -129,7 +134,8 @@ def test_the_stats_mirror_carries_it(node, monkeypatch):
         monkeypatch.setattr(ss.SyncServer, name, staticmethod(lambda: {}))
     payload = asyncio.run(node._signal_gen_stats_payload())
     assert payload["trend_pa"] == {"marker": 1}
-    assert set(payload) >= {"breakout", "bounce", "reversal_engine"}
+    # CHANGED 2026-10-11 (owner): no "bounce" key since wip/nice-vaughan.
+    assert set(payload) == {"breakout", "reversal_engine", "trend_pa"}
 
 
 # ── the panel ────────────────────────────────────────────────────────────────
@@ -154,4 +160,5 @@ def test_running_reports_it_once_built(tpa, monkeypatch):
     assert registry.running()["trend_pa"] is True
     monkeypatch.setattr(service, "_instance", None)
     assert "trend_pa" not in registry.running()
-    assert "bounce" in registry.running(), "the wire slots are always reported"
+    # CHANGED 2026-10-11 (owner): Bounce's slot is gone (wip/nice-vaughan).
+    assert "bounce" not in registry.running()

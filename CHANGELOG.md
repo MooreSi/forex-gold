@@ -1,3 +1,61 @@
+## v0.613 — Security, bug fixes and app improvements (2026-10-11)
+
+The About screen carries the user-facing summary; this is the engineering
+record. 92 commits since v0.612, grouped as the owner asked.
+
+**Security improvements**
+- `checks.yml` and `windows-probe.yml` set `permissions: contents: read`, so
+  the GITHUB_TOKEN no longer gets the repo's default scope.
+- TLS test servers pin `minimum_version` to TLS 1.2; tests use `tmp_path`
+  instead of the deprecated `tempfile.mktemp`. The other ten code scanning
+  alerts were dismissed on GitHub with reasons.
+- The admin console's `index.html` is served `no-store`, so a browser never
+  runs a stale console against a newer API.
+- A request body with a NaN literal is answered 422, not 500.
+- `apply_update()` stashes tracked edits ("Set aside by Update <time>")
+  before `checkout -f`; a failed stash stops the update and touches nothing.
+
+**Bug fixes**
+- Daily goal and daily-loss limit count the Trading Clock's day
+  (`clock.day_start_ts()`); Resume no longer lifts a secured goal or forgets
+  a pre-Resume loss; the goal is measured on MT5's realised figure.
+- A profit target is `pnl >= target`, asked fresh (handover 038 answer B):
+  a loss below it re-opens trading. The 2026-10-05 latch is removed.
+- A trading pause stops the limit and resting-order routes; manual orders
+  still go through. A queued signal is replaced when its channel re-posts a
+  correction within 120 s.
+- A refused close retries under the other filling modes (retcode 10030). A
+  channel's "move SL to break even" never loosens a stop.
+- `gross_pnl` and `realised_pnl` follow the broker on profit sync (bugs/049),
+  with a boot backfill for older rows.
+- `get_equity_drawdown_pct` reads the app_config `peak_balance` watermark; it
+  read a removed column and returned 0 for every stored ML vector.
+- Two dashboard reads no longer stall the trading loop; latency timings use
+  `perf_counter` on Windows; `_get_tick_at` returns the quote in true UTC.
+- A settings save invalidates the poll keyed by its URL, so the Dashboard
+  shows a changed daily loss limit at once.
+- EA v1.10: silence while blocked in OrderSend is not the app going away.
+  The EA installs into a portable terminal's own Experts folder.
+- A price typed with a trailing full stop is read; plain TP lines parse.
+- ORB, Trend PA and Set & Forget: fixes found by replaying them on real gold.
+
+**General app improvements**
+- Contradiction review between signal sources (handover 041, migration 59,
+  off): refuses a signal when another source opposes it and the market
+  review favours the other side or neither. Never cancels or closes.
+- Auto templates: one regime source (`live_regime`), an optional H1
+  classifier (migration 60, off), and an optional dwell before a regime
+  change acts (`auto_regime_min_dwell_ticks`, default 1).
+- Reversal engine: an optional volatility-regime tail on the ML vector
+  (migration 61, off), vol-target sizing wired but off, a one-row-per-signal
+  virtual ledger and protected online learning.
+- Breakout's dual-bias gate applied ON once per database (bugs/060).
+- Daily goal can move open trades to break even; Dashboard 1D/1W/30D/All,
+  wider equity curve, market badge, "Session Switched Off"; Broker chart
+  scrolls back; Feedback button; losing days in the Compound Calculator.
+- One definition of the trading sessions (21:00-24:00 UTC is no session).
+- Not yet run through a demo session.
+
 ## v0.612 — The VPS trades Telegram itself (2026-09-29)
 
 The About screen carries the user-facing summary; this is the engineering

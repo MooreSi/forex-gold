@@ -7,6 +7,41 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.613",
+        "Security, bug fixes and app improvements",
+        "blue",
+        "",
+        [
+            "Security: GitHub workflows run with read-only repository "
+            "permissions, test servers require TLS 1.2 or newer, temporary "
+            "files are created safely, the admin console's page is never "
+            "cached by the browser, and a request carrying a NaN value is "
+            "refused cleanly instead of failing on the server.",
+            "Security: Settings > Update sets aside any uncommitted edits in "
+            "git stash before it updates, instead of discarding them.",
+            "Bug fixes: the daily goal and daily loss limit count the Trading "
+            "Clock's day, a goal already reached survives Resume, and a "
+            "profit target follows the running total so a loss below it "
+            "re-opens trading.",
+            "Bug fixes: a trading pause stops the limit and resting-order "
+            "routes too, a refused close retries under the other filling "
+            "modes, a channel's break-even move never loosens a stop, and "
+            "gross and realised P&L follow the broker's figure.",
+            "Bug fixes: two dashboard reads no longer stall the trading loop, "
+            "a changed daily loss limit shows on the Dashboard at once, a "
+            "price typed with a trailing full stop is read, and tick times "
+            "are read in true UTC.",
+            "Improvements: an optional contradiction review between signal "
+            "sources, an optional H1 regime for Auto templates, and optional "
+            "volatility inputs for the Reversal engine, all off by default.",
+            "Improvements: the daily goal can move open trades to break even, "
+            "the dashboard's performance cards have 1D/1W/30D/All, the Broker "
+            "chart scrolls back, a Feedback button, losing days in the "
+            "Compound Calculator, and fixes to ORB, Trend PA and Set & Forget "
+            "found by replaying them on real gold.",
+        ],
+    ),
+    (
         "v0.612",
         "The VPS trades Telegram itself",
         "blue",

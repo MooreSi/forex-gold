@@ -45,8 +45,8 @@ def update_risk_settings(fields: dict) -> None:
 # caller is the handover, a service, which may not import a controller.
 
 
-# Which engines exist, in the fixed binding order. Re-exported so a router can
-# render the tab from it rather than restating the list and drifting.
+# Which engines exist. Re-exported so a router can render the tab from it
+# rather than restating the list and drifting.
 ENGINE_NAMES = _engines.ENGINE_NAMES
 # Not the same list: ENGINE_NAMES is the sync protocol's positional order and
 # still holds Bounce's empty slot. See services/engines/registry.py.
@@ -74,8 +74,7 @@ def engines_running() -> dict:
 
 
 def sub_engines() -> tuple:
-    """(breakout, bounce, reversal) instances in the fixed binding order the
-    sync server's server_start has always received them."""
+    """(breakout, reversal) instances, for the sync server's server_start."""
     return _engines.all_instances()
 
 

@@ -112,7 +112,7 @@ def node(monkeypatch):
                         lambda f: (state["writes"].append(f),
                                    state["local_settings"].update(f)))
     monkeypatch.setattr(engine_registry, "_ENGINE_SERVICES", {
-        "breakout": _Svc(breakout), "bounce": None, "reversal": _Svc(reversal),
+        "breakout": _Svc(breakout), "reversal": _Svc(reversal),
     })
     state.update(peer=peer, breakout=breakout, reversal=reversal)
     return state
@@ -186,8 +186,13 @@ class TestStartingAnEngine:
 
         assert result["running"] is False
 
-    async def test_an_engine_this_install_never_built_is_not_started(self, node):
-        result = await rc.set_engine_running("bounce", True)
+    async def test_an_engine_this_install_never_built_is_not_started(
+            self, node, monkeypatch):
+        # Bounce's empty slot was the example until 2026-09-28. An instance
+        # that was never created is the same state.
+        monkeypatch.setitem(engine_registry._ENGINE_SERVICES, "reversal", _Svc(None))
+
+        result = await rc.set_engine_running("reversal", True)
 
         assert result["built"] is False
         assert result["running"] is False

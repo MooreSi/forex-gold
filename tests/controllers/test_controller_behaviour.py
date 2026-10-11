@@ -331,7 +331,7 @@ class TestTheSyncServer:
         _run(sync_ctl.server_start("0.0.0.0", "8765", "tok", main_engine="E"))
 
         assert built.calls == [((), {"main_engine": "E", "breakout_engine": None,
-                                     "bounce_engine": None, "re_engine": None})]
+                                     "re_engine": None})]
         assert started.calls == [(("0.0.0.0", 8765, "tok"), {})]
 
     def test_stopping_with_no_server_is_a_no_op_not_a_crash(self, monkeypatch):

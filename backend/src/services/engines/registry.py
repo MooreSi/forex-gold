@@ -3,14 +3,15 @@
 One place, because there were two. `engines_controller` held this table and its
 start/stop loops from the stage-1 restructure; `services/cluster/handover.py`
 grew an identical copy on 2026-09-18 when the mode toggle came back, and two
-copies of "which engines exist and which of them may be bulk-started" is how
-the empty `bounce` slot gets re-introduced in one of them and not the other.
+copies of "which engines exist and which of them may be bulk-started" is how a
+stale entry gets re-introduced in one of them and not the other.
 
-**The order is part of the contract.** `all_instances()` returns
-(breakout, bounce, reversal) in that fixed order because the sync server's
-`server_start` binds them positionally, and a paired node on an older build
-would see Reversal shift into Bounce's place. Bounce's code was deleted on
-2026-09-14; its NAME stays for exactly that reason.
+**Names, not positions.** Every sync message carries an engine by name, so
+nothing on the wire depends on the order here. Bounce kept an empty slot from
+its deletion on 2026-09-14 until 2026-09-28 on the belief that the sync server
+bound engines positionally across nodes; it never did -- the position only ever
+existed inside one process (tests/services/engines/test_bounce_is_gone_from_the_wire.py).
+The order still decides how the Signal Generator tab lists them.
 
 A service rather than a controller because a service needs it: the handover
 sequence cannot import a controller, and it is the only caller that matters.
@@ -30,16 +31,14 @@ __all__ = [
 
 _ENGINE_SERVICES: dict[str, Any] = {
     "breakout": _bo_svc,
-    "bounce": None,
     "reversal": _re_svc,
 }
 
 ENGINE_NAMES = tuple(_ENGINE_SERVICES)
 
-# Engines added since, reached by NAME only -- never through `all_instances()`
-# or ENGINE_NAMES, which are the positional wire contract above. The sync
-# server finds these through `instance()`, so a paired node on an older build
-# sees nothing shift. Trend PA: 2026-09-29, docs/todo/012.
+# Engines added since, reached by NAME only -- never through `all_instances()`,
+# which the sync server's `server_start` unpacks. The sync server finds these
+# through `instance()`. Trend PA: 2026-09-29, docs/todo/012.
 _NAMED_SERVICES: dict[str, Any] = {
     "trend_pa": _tpa_svc,
 }
@@ -51,27 +50,18 @@ def _all_services() -> dict:
     return {**_ENGINE_SERVICES, **_NAMED_SERVICES}
 
 
-# Every name a control may address: the wire three plus the named ones.
+# Every name a control may address: the table engines plus the named ones.
+# "bounce" is not one of them since 2026-09-28: refused like any unknown name.
 ALL_NAMES = tuple(_all_services())
 
-# What this build can actually RUN, which is not the same list.
-#
-# `ENGINE_NAMES` is the wire order and must keep Bounce. This is the screen's
-# list and must not: its code was deleted on 2026-09-14, and a Start button for
-# an engine that does not exist is a control that cannot work. Asked for
-# explicitly by the owner, 2026-09-19 ("the bounce signal generator should have
-# been completely removed").
-#
-# Derived, never written out again -- a hand-maintained second list is exactly
-# how the empty slot gets re-introduced in one place and not the other, which
-# is what this module was created to stop.
+# The table engines this build can run. Equal to ENGINE_NAMES now that Bounce's
+# empty slot is gone; derived rather than restated, so a `None` slot put back
+# one day still drops out of the screen.
 IMPLEMENTED_NAMES = tuple(
     name for name, svc in _ENGINE_SERVICES.items() if svc is not None
 )
 
-# What the Signal Generator tab shows: the wire engines this build runs, then
-# the by-name ones. Separate from IMPLEMENTED_NAMES, which is pinned as a
-# subset of the wire order (tests/services/engines/test_registry_implemented).
+# What the Signal Generator tab shows: the table engines, then the by-name ones.
 SHOWN_NAMES = IMPLEMENTED_NAMES + tuple(
     name for name, svc in _NAMED_SERVICES.items() if svc is not None
 )
@@ -87,15 +77,9 @@ def canonical(name: str) -> str:
     return _ALIASES.get(name, name)
 
 
-# Belt and braces: the slot is empty, so the loop would skip it anyway. The
-# exclusion keeps the safety property asserted rather than incidental — the day
-# something is put back in that slot, this is what stops a mode switch starting
-# it.
-_NOT_BULK_STARTED = ("bounce",)
-
-
 def _of(svc) -> Any:
-    """An engine, or None -- for an empty slot as much as an unbuilt one."""
+    """An engine's live instance, or None -- for an empty slot as much as an
+    unbuilt one."""
     return svc.get_instance() if svc is not None else None
 
 
@@ -105,15 +89,14 @@ def instance(name: str) -> Any:
 
 
 def all_instances() -> tuple:
-    """(breakout, bounce, reversal), in the fixed binding order."""
+    """(breakout, reversal)."""
     return tuple(_of(svc) for svc in _ENGINE_SERVICES.values())
 
 
 def running() -> dict:
-    """Every wire-order engine, built or not (Bounce's empty slot included,
-    as it always was), plus each by-name engine that has been built. An
-    unbuilt by-name engine has no slot to report; the screen reads its absence
-    as "not running", which is what it is."""
+    """Every table engine, built or not, plus each by-name engine that has been
+    built. An unbuilt by-name engine has no slot to report; the screen reads
+    its absence as "not running", which is what it is."""
     out = {name: bool(getattr(_of(svc), "is_running", False))
            for name, svc in _ENGINE_SERVICES.items()}
     for name, svc in _NAMED_SERVICES.items():
@@ -124,9 +107,7 @@ def running() -> dict:
 
 
 def start_stopped() -> None:
-    for name, svc in _all_services().items():
-        if name in _NOT_BULK_STARTED:
-            continue
+    for svc in _all_services().values():
         eng = _of(svc)
         if eng is not None and not getattr(eng, "is_running", False):
             eng.start()

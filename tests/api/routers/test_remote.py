@@ -90,7 +90,7 @@ def remote(monkeypatch):
                         lambda: state["connected"])
     monkeypatch.setattr(remote_router.sync_ctl, "request_model_snapshot", _snapshot)
     monkeypatch.setattr(remote_router.engines_ctl, "sub_engines",
-                        lambda: (object(), None, object()))
+                        lambda: (object(), object()))
     return state
 
 
@@ -141,8 +141,9 @@ class TestAcceptingConnections:
     def test_the_engines_reach_the_server_under_the_right_names(
         self, make_client, remote, monkeypatch,
     ):
-        """`sub_engines()` returns (breakout, bounce, reversal) in a fixed
-        order and `server_start` takes them by keyword. Unpacking them in the
+        """`sub_engines()` returns (breakout, reversal) in a fixed order and
+        `server_start` takes them by keyword. (Bounce's empty slot sat between
+        them until 2026-09-28.) Unpacking them in the
         wrong order sends a paired node the wrong engine under the right name,
         and nothing downstream would notice.
 
@@ -153,8 +154,8 @@ class TestAcceptingConnections:
 
         from backend.src.controllers import sync_controller as real_sync
 
-        breakout, bounce, reversal = object(), object(), object()
-        remote["engines"] = (breakout, bounce, reversal)
+        breakout, reversal = object(), object()
+        remote["engines"] = (breakout, reversal)
         monkey = remote["engine_kwargs"] = {}
 
         async def _record(host, port, token, **kw):
@@ -163,7 +164,7 @@ class TestAcceptingConnections:
 
         monkeypatch.setattr(remote_router.sync_ctl, "server_start", _record)
         monkeypatch.setattr(remote_router.engines_ctl, "sub_engines",
-                            lambda: (breakout, bounce, reversal))
+                            lambda: (breakout, reversal))
 
         make_client().put("/api/remote/server", json={"enabled": True})
 
@@ -172,7 +173,6 @@ class TestAcceptingConnections:
         inspect.signature(real_sync.server_start).bind(
             "host", 1, "tok", **monkey)
         assert monkey["breakout_engine"] is breakout
-        assert monkey["bounce_engine"] is bounce
         assert monkey["re_engine"] is reversal
 
     def test_without_a_token_it_refuses_rather_than_listening(

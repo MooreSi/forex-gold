@@ -23,11 +23,11 @@ MSG_PING              = "ping"
 MSG_PONG              = "pong"
 
 # Full signal-generator stats (win rates, performance breakdowns, ML learning
-# panels) for the Breakout/Bounce/Reversal Engines — sent far less often than
+# panels) for the Breakout and Reversal Engines — sent far less often than
 # the 3s status heartbeat since this data only changes when a signal closes
 # or a periodic ML retrain happens. Deliberately excludes cycle logs (raw
 # per-cycle diagnostic dumps, not a "progress" metric).
-MSG_SIGNAL_GEN_STATS = "signal_gen_stats"   # VPS -> Mac: {"breakout": {...}, "bounce": {...}, "reversal_engine": {...}}
+MSG_SIGNAL_GEN_STATS = "signal_gen_stats"   # VPS -> Mac: {"breakout": {...}, "reversal_engine": {...}}
 
 # ── Settings sync (VPS is authoritative) ─────────────────────────────────────
 MSG_SETTINGS_PROPOSE = "settings_propose" # Mac -> VPS: "please apply this change"
@@ -105,7 +105,7 @@ MSG_RESUME_ACK        = "resume_ack"        # VPS -> Mac: resumed accepting new 
 
 # ── Remote engine control (Signal Generator panels, Remote mode) ────────────
 # When this node is in Remote mode, the Start/Stop/Run Now buttons on the
-# Breakout/Bounce/Reversal Engine panels must act on the VPS's own engine instance,
+# Breakout/Reversal Engine panels must act on the VPS's own engine instance,
 # not this node's own (stood-down) local one — otherwise "Start Engine"
 # silently does nothing useful while looking like it worked.
 MSG_ENGINE_CONTROL     = "engine_control"      # Mac -> VPS: {"engine": "reversal_engine", "action": "start"/"stop"/"run_now"}

@@ -147,11 +147,11 @@ async def set_server(body: ServerWrite, eng: Any = Depends(engine_dep)) -> dict:
         node_ctl.set_app_config(SERVER_ENABLED, "0")
         raise Refusal("Generate a pairing token first — Settings > Node.")
 
-    breakout, bounce, reversal = engines_ctl.sub_engines()
+    breakout, reversal = engines_ctl.sub_engines()
     try:
         await sync_ctl.server_start(
             _listen_host(), port, token, main_engine=eng,
-            breakout_engine=breakout, bounce_engine=bounce, re_engine=reversal,
+            breakout_engine=breakout, re_engine=reversal,
         )
     except Exception as exc:
         # Recorded as off: the listener is not up, and a stored "on" would have

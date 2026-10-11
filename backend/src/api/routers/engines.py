@@ -1,6 +1,6 @@
 """Signal Generator tab — the engines that produce signals of their own.
 
-Three engines behind one tab: Breakout, Bounce and Reversal. They are
+Two engines behind one tab: Breakout and Reversal. They are
 structurally near-identical and **deliberately not collapsed** — the frontend
 conventions record that explicitly, because "they look alike and behave
 differently". This router keeps them separate for the same reason: one generic
@@ -36,11 +36,8 @@ router = APIRouter(prefix="/api/engines", tags=["engines"])
 # name with no label here falls back to its id, which reads as an oversight
 # rather than hiding the engine.
 _LABELS = {"breakout": "Breakout", "reversal": "Reversal", "trend_pa": "Trend PA"}
-# IMPLEMENTED_NAMES, not ENGINE_NAMES. The latter is the sync protocol's
-# positional order and still carries Bounce's empty slot, because dropping the
-# name would shift Reversal into its place on the wire. The SCREEN must not
-# show it: its code was deleted on 2026-09-14, so a card with a Start button
-# is a control that cannot work. Owner's request, 2026-09-19.
+# Bounce is not here: its code was deleted on 2026-09-14, it left the screen on
+# 2026-09-19 and the registry on 2026-09-28.
 ENGINE_LABELS = {name: _LABELS.get(name, name)
                  for name in engines_ctl.SHOWN_NAMES}
 
@@ -78,9 +75,8 @@ class AiEval(BaseModel):
 def _label(name: str) -> str:
     """What to call an engine in a message.
 
-    Falls back to the raw name, because a name can be addressable without
-    being on this build's screen -- Bounce is, for a peer that still runs it --
-    and a KeyError here would turn a plain refusal into a 500.
+    Falls back to the raw name, so a name this build does not know becomes a
+    plain refusal rather than a KeyError and a 500.
     """
     return ENGINE_LABELS.get(name, _LABELS.get(name, name))
 
@@ -92,11 +88,8 @@ def _known_or_refuse(name: str) -> None:
     only applies when the command was going to be applied here at all — in
     Remote mode the engine that matters is the peer's.
     """
-    # ENGINE_NAMES, not ENGINE_LABELS. The labels are what this build SHOWS,
-    # and Bounce left that list on 2026-09-19; the names are what the sync
-    # protocol carries, and a paired node on an older build may still have
-    # Bounce. Validating against the screen would make an engine the peer
-    # genuinely runs unaddressable from here.
+    # "bounce" lands here since 2026-09-28: refused, never forwarded to a
+    # peer, which answers it with an error of its own anyway.
     if name not in engines_ctl.ALL_NAMES:
         raise Refusal(f"Unknown engine {name!r}. "
                       f"Known: {', '.join(engines_ctl.ALL_NAMES)}.",
@@ -111,9 +104,8 @@ async def state() -> dict:
         "engines": [
             {"id": key, "label": label,
              "running": bool(running.get(key, False)),
-             # An engine slot with no service is a real state — Bounce is one
-             # on an install that never enabled it — and reads differently from
-             # "built but stopped".
+             # An engine whose instance was never created reads differently
+             # from "built but stopped".
              "built": engines_ctl.get_engine(key) is not None}
             for key, label in ENGINE_LABELS.items()
         ],
@@ -234,9 +226,8 @@ async def set_running(body: EngineAction) -> dict:
     """Start or stop ONE engine, by name.
 
     Named rather than bulk. The bulk start (`services/engines/registry.py`)
-    exists for the app's own startup and the Local/Remote handover, and
-    deliberately skips Bounce; a UI button wired to it would start engines the
-    operator did not ask for.
+    exists for the app's own startup and the Local/Remote handover; a UI
+    button wired to it would start engines the operator did not ask for.
 
     **It may not land on this machine.** When the VPS is the active trader,
     this node's sub-engines are stood down, so starting one here would start

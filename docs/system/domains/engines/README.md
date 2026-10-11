@@ -15,9 +15,19 @@ live-execution toggle is on — place real MT5 orders through the main engine:
 
 There were three. **Bounce / TestSignal** (mean-reversion off key levels) lost
 its panel on 2026-09-02, was stopped on 2026-09-13 and was deleted on
-2026-09-14 — `docs/todo/bugs/046` is the whole arc. Its name still occupies
-position 1 of 3 in `engines_controller._ENGINE_SERVICES`, bound to `None`,
-because the sync protocol binds engines by that fixed order.
+2026-09-14 — `docs/todo/bugs/046` is the whole arc. Its name kept an empty
+slot in `services/engines/registry.py`, the sync server, the stats payload and
+the AI-eval table until 2026-09-28, on the belief that the sync protocol bound
+engines by position. **It never did**: the order only existed inside one
+process (`sub_engines()` unpacked in `api/routers/remote.py`, passed to
+`server_start` by keyword). Every sync message names its engine, and every
+build since the first commit reads `signal_gen_stats` with `.get(key, {})`.
+A peer on an older build that still sends `engine: "bounce"` gets an ack with
+`unknown engine: bounce` and nothing changes; a stood-down list that names it
+is stepped over on RESUME. The dashboard refuses `bounce` with a 400 like any
+unknown name. Pinned by `tests/services/engines/test_bounce_is_gone_from_the_wire.py`.
+Historical rows labelled `bounce` (analytics, `regime_drift`) and the synced
+`sg_*` risk-setting columns are data and settings, not the engine, and stay.
 
 It stayed on Trading > Strategy (and the Telegram panel's channel picker, and
 the channel-strategy sync snapshot) until 2026-09-29, because

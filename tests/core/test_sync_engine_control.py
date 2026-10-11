@@ -12,8 +12,8 @@ The properties that matter are about what must NOT happen, and about the reply:
     fall-through, and a router that defaulted to `start` would turn a
     malformed message into a running generator.
   * `set_ai_eval` writes a risk setting, so the engine name is mapped through a
-    two-entry table rather than interpolated. Anything else is an error, not a
-    write.
+    table rather than interpolated (one entry since Bounce left it,
+    2026-09-28). Anything else is an error, not a write.
   * **Every path replies.** The Mac's button sits with a spinner on it; a
     branch that returns without an ack leaves the operator unable to tell
     "refused" from "not delivered".
@@ -73,8 +73,7 @@ def settings_writes(monkeypatch):
 @pytest.fixture
 def node(monkeypatch):
     srv = ss.SyncServer.__new__(ss.SyncServer)
-    srv.engines = {"bounce": _Engine(), "breakout": _Engine(),
-                   "reversal_engine": _Engine()}
+    srv.engines = {"breakout": _Engine(), "reversal_engine": _Engine()}
     monkeypatch.setattr(ss.SyncServer, "_sub_engines", lambda _s: srv.engines)
     return srv
 
@@ -88,11 +87,11 @@ class TestEveryPathReplies:
     """The Mac drives these from a screen with a spinner on it."""
 
     @pytest.mark.parametrize("msg", [
-        {"engine": "bounce", "action": "start"},
-        {"engine": "bounce", "action": "stop"},
-        {"engine": "bounce", "action": "run_now"},
+        {"engine": "breakout", "action": "start"},
+        {"engine": "breakout", "action": "stop"},
+        {"engine": "breakout", "action": "run_now"},
         {"engine": "nonsense", "action": "start"},
-        {"engine": "bounce", "action": "nonsense"},
+        {"engine": "breakout", "action": "nonsense"},
         {},
     ])
     async def test_it_acks(self, node, msg, settings_writes):
@@ -114,11 +113,11 @@ class TestNothingHappensOnAMalformedMessage:
     async def test_an_unknown_action_is_an_error_not_a_start(self, node):
         """A router that fell through to `start` would turn a malformed message
         into a running signal generator."""
-        ack = await _control(node, _Ws(), engine="bounce", action="frobnicate")
+        ack = await _control(node, _Ws(), engine="breakout", action="frobnicate")
 
         assert "unknown action" in ack["error"]
-        assert node.engines["bounce"].calls == []
-        assert node.engines["bounce"].is_running is False
+        assert node.engines["breakout"].calls == []
+        assert node.engines["breakout"].is_running is False
 
     async def test_an_empty_message_starts_nothing(self, node):
         ack = await _control(node, _Ws())
@@ -132,18 +131,18 @@ class TestTheActionsThatDoWork:
     every test above."""
 
     async def test_start_starts(self, node):
-        ack = await _control(node, _Ws(), engine="bounce", action="start")
+        ack = await _control(node, _Ws(), engine="breakout", action="start")
 
-        assert node.engines["bounce"].calls == ["start"]
+        assert node.engines["breakout"].calls == ["start"]
         assert ack.get("error") is None
         assert ack["is_running"] is True
 
     async def test_stop_stops(self, node):
-        node.engines["bounce"].is_running = True
+        node.engines["breakout"].is_running = True
 
-        ack = await _control(node, _Ws(), engine="bounce", action="stop")
+        ack = await _control(node, _Ws(), engine="breakout", action="stop")
 
-        assert node.engines["bounce"].calls == ["stop"]
+        assert node.engines["breakout"].calls == ["stop"]
         assert ack["is_running"] is False
 
     async def test_run_now_runs_one_cycle(self, node):
@@ -159,29 +158,28 @@ class TestTheAckReportsRealityNotTheRequest:
     async def test_a_failed_start_is_reported_as_not_running(self, node):
         """Echoing the requested action back would make a failed start look
         like a success, and the Mac's button would go green."""
-        node.engines["bounce"] = _Engine(raises=True)
+        node.engines["breakout"] = _Engine(raises=True)
 
-        ack = await _control(node, _Ws(), engine="bounce", action="start")
+        ack = await _control(node, _Ws(), engine="breakout", action="start")
 
         assert "engine failed to start" in ack["error"]
         assert ack["is_running"] is False
 
     async def test_an_engine_that_raises_does_not_kill_the_connection(self, node):
-        node.engines["bounce"] = _Engine(raises=True)
+        node.engines["breakout"] = _Engine(raises=True)
         ws = _Ws()
 
-        await node._handle_engine_control(ws, {"engine": "bounce",
+        await node._handle_engine_control(ws, {"engine": "breakout",
                                                "action": "start"})
 
         assert ws.sent, "the exception escaped instead of becoming an ack"
 
 
-class TestSetAiEvalWritesOnlyItsTwoKnownKeys:
+class TestSetAiEvalWritesOnlyItsKnownKey:
     """This one writes a risk setting rather than touching an engine, so the
     engine name is mapped through a table instead of being interpolated."""
 
     @pytest.mark.parametrize("engine,key", [
-        ("bounce", "sg_claude_eval_enabled"),
         ("breakout", "bo_claude_eval_enabled"),
     ])
     async def test_it_maps_the_engine_to_its_own_flag(self, node,
@@ -194,10 +192,10 @@ class TestSetAiEvalWritesOnlyItsTwoKnownKeys:
 
     async def test_disabling_writes_zero_not_absence(self, node,
                                                      settings_writes):
-        await _control(node, _Ws(), engine="bounce", action="set_ai_eval",
+        await _control(node, _Ws(), engine="breakout", action="set_ai_eval",
                        enabled=False)
 
-        assert settings_writes == [{"sg_claude_eval_enabled": 0}]
+        assert settings_writes == [{"bo_claude_eval_enabled": 0}]
 
     async def test_an_engine_with_no_flag_writes_NOTHING(self, node,
                                                          settings_writes):

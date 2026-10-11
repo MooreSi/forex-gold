@@ -287,7 +287,7 @@ def is_remote_node() -> bool:
     """True iff this process is running in the VPS/remote-server sync role
     (sync_server_enabled) — a fixed physical-machine fact, independent of
     which side is currently the active trader or whether centralized signal
-    generation is toggled on. Used to keep the Breakout, Bounce, and Reversal Engine
+    generation is toggled on. Used to keep the Breakout and Reversal Engine
     analytical signal generators local-node-only unconditionally, rather than
     only as a side effect of centralized_signal_gen_enabled staying on (see
     should_generate_signals_here below, which is execution-routing-focused

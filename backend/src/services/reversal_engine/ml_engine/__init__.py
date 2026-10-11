@@ -37,6 +37,7 @@ _labeled_count = 0
 _version = "re_ml_v9"
 
 from backend.src.services.reversal_engine import ml_handover as _ho  # noqa: E402
+from backend.src.services.reversal_engine import vol_regime as _vol  # noqa: E402
 
 
 # _VIRTUAL_LOT / _DOLLARS_PER_POINT / _R_LABEL_CLAMP moved to _training_data.py
@@ -510,6 +511,20 @@ def get_daily_research_scores() -> tuple[float, float]:
         return 0.5, 0.5
 
 
+def with_vol_tail(features: list, signal_data: Optional[dict]) -> list:
+    """`features` as the installed model should score them, with the live
+    `vol_regime` input appended when `re_vol_regime_feature_enabled` is on.
+
+    Off, this returns `features` unchanged (docs/todo/016), unless the model
+    installed is still the width it was trained at with the switch on, in
+    which case that slot gets the neutral rather than failing the gate open.
+    A wrapper rather than a `predict` argument, so `predict` is unchanged.
+    """
+    return _vol.fit_tail(list(features), _vol.live_tail(signal_data),
+                         _ho.model_width(_model_batch, _model_online),
+                         len(FEATURE_NAMES))
+
+
 def predict(features: list) -> Optional[float]:
     """Return predicted R-multiple or None if not trained.
     Positive = expected profitable, negative = expected losing.
@@ -571,6 +586,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
     feats = stored_vector(sig)
     if feats is None:
         return
+    feats = feats + _vol.row_tail(sig, _vol.feature_enabled())
 
     label = _realised_r(sig)
     if label is None:

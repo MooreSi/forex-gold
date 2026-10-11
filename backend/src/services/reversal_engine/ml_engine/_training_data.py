@@ -73,6 +73,17 @@ def _get_training_data():
     """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
     try:
         from backend.src.services.reversal_engine import reversal_engine_repo as re_db
+        from backend.src.services.reversal_engine import vol_regime as _vol
+        # Read once, so every row in this pass has the same width. On, any
+        # row the minute sweep has not reached is measured first: the stored
+        # history is reused, not read as neutral (docs/todo/016).
+        vol_on = _vol.feature_enabled()
+        if vol_on:
+            try:
+                while _vol.backfill():
+                    pass
+            except Exception as exc:
+                _log.debug("[RE-ML] vol_regime backfill error: %s", exc)
         rows = re_db.get_ml_training_data()
         # Oldest first: _fit_batch weights row i by its position, and the
         # query has no ORDER BY to promise that.
@@ -88,7 +99,7 @@ def _get_training_data():
             label = _realised_r(r)
             if label is None:
                 continue
-            X.append(f)
+            X.append(f + _vol.row_tail(r, vol_on))
             y.append(label)
         return X, y
     except Exception as exc:

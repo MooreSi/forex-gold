@@ -76,6 +76,9 @@ EXPECTED_DEFAULTS = {
     "orb_ny_mode":             0,      # the London ORB auto-execute
     "tpa_session_start_utc":   8,      # trend_pa.strategy session_start_utc
     "tpa_session_end_utc":     21,     # trend_pa.strategy session_end_utc
+    # New 2026-10-11 (docs/todo/016). 1 = act on the first tick that reads a
+    # new regime, which is what core_auto_template did before it existed.
+    "auto_regime_min_dwell_ticks": 1,
 }
 
 

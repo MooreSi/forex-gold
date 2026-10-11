@@ -124,32 +124,32 @@ def get_equity_drawdown_pct() -> float:
 
 # ── Regime detection helper ───────────────────────────────────────────────────
 
-def get_regime_score(adx: float, atr: float, atr_avg: float = 0.0) -> float:
+def get_regime_score(adx: float, atr: float) -> float:
     """
-    Classify current market regime as a normalised score [0, 1]:
+    ADX bucket as a normalised score [0, 1]:
       1.0  strongly trending   (ADX ≥ 40)
       0.75 trending            (ADX 28-40)
-      0.5  mixed/volatile      (ADX 20-28 or ATR >> average)
+      0.5  mixed               (ADX 20-28)
       0.25 weakly ranging      (ADX 14-20)
       0.0  ranging/choppy      (ADX < 14)
-    ATR expansion (atr / atr_avg > 1.5) promotes to volatile regardless of ADX.
+
+    `atr` is not read. It stays in the signature so the six call sites keep
+    their shape. Until 2026-10-11 an `atr_avg` argument promoted an ATR spike
+    to 0.5, but no caller ever passed it, so that branch never ran and every
+    stored `regime_score` is this ADX bucket. It was deleted rather than
+    switched on: 7,553 training vectors hold the value as written. Volatility
+    reaches the Reversal model through its own feature, `vol_regime`
+    (docs/todo/016).
     """
     if adx >= 40:
-        regime = 1.0
-    elif adx >= 28:
-        regime = 0.75
-    elif adx >= 20:
-        regime = 0.5
-    elif adx >= 14:
-        regime = 0.25
-    else:
-        regime = 0.0
-
-    # ATR spike → volatile regime
-    if atr_avg > 0 and atr / atr_avg > 1.5:
-        regime = max(regime, 0.5)
-
-    return regime
+        return 1.0
+    if adx >= 28:
+        return 0.75
+    if adx >= 20:
+        return 0.5
+    if adx >= 14:
+        return 0.25
+    return 0.0
 
 
 # ── AI research inputs ────────────────────────────────────────────────────────

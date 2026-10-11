@@ -98,3 +98,15 @@ remote row with no `remote_trade_id` stays unclosable. Pinned by
 `tests/core/test_remote_close_over_sync.py`, `tests/api/routers/test_orders.py`
 and `ActiveTradesSection.test.tsx`. Needs a demo session before it is trusted
 live: owner, 2026-09-29.
+
+## Auto regime flips can be made to wait (2026-10-11, docs/todo/016)
+
+`core_auto_template.run_auto_template_cycle` forces the baseline templates
+and triggers a paid AI review on every change of `dpm_engine.detect_regime`,
+an ADX(14) on 30 M5 bars around fixed 20/25 cutoffs. Expert Tunable
+`auto_regime_min_dwell_ticks` (Auto templates group) makes a new regime count
+only after that many consecutive one-minute reads; an interrupted run starts
+again. **Default 1 = act on the first read, byte-identical to before.** The
+first pass never waits. `_min_dwell_ticks` falls back to 1 if the tunable
+cannot be read. Latent today: no source is on Auto, and the DPM cache is
+empty on this account (docs/todo/014).

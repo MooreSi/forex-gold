@@ -292,4 +292,11 @@ _RECENT: list[tuple[int, str, object]] = [
         "CREATE TABLE IF NOT EXISTS ai_fallback_not_signal ("
         " text_hash TEXT PRIMARY KEY, classified_at REAL NOT NULL)",
     ]),
+
+    # The Reversal ML model's volatility-regime input (docs/todo/016). Off:
+    # the model's vector is unchanged. The data is measured either way, so
+    # turning it on reuses the stored history.
+    (59, "Reversal ML: volatility-regime feature (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_vol_regime_feature_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

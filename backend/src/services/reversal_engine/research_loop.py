@@ -53,6 +53,9 @@ from backend.src.services.reversal_engine.tpl_label import (
 from backend.src.services.reversal_engine.edge_model import (
     edge_model_refit_sweep as _edge_model_refit_sweep_impl,
 )
+from backend.src.services.reversal_engine.vol_regime import (
+    vol_ratio_sweep as _vol_ratio_sweep_impl,
+)
 
 
 log = logging.getLogger(__name__)
@@ -141,6 +144,15 @@ async def _research_loop(engine: Any, is_running: Callable[[], bool]) -> None:
             break
         except Exception as e:
             log.warning("_edge_model_refit_sweep error: %s", e)
+        # ATR against its five-day median for every stored signal, so the
+        # vol_regime switch reuses the history when it is turned on.
+        # docs/todo/016. Data only; runs whether the switch is on or not.
+        try:
+            await _vol_ratio_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_vol_ratio_sweep error: %s", e)
         # The GLD option chain, once a weekday after the US close: a GEX
         # history to measure before anything acts on it. docs/todo/009.
         try:

@@ -228,6 +228,19 @@ def xasset_features_enabled(rs: dict) -> bool:
     return _on(rs, "re_xasset_features_enabled")
 
 
+def vol_regime_feature_enabled(rs: dict) -> bool:
+    """Does the Reversal ML model learn and score with `vol_regime`, ATR
+    against its own five-day median?
+
+    Off, the model's input vector is exactly what it was before the feature
+    existed. On, the ratio joins the vector from the next retrain (every 5
+    closes), using the history `vol_regime.backfill` has already measured.
+    It changes which signals the ML gate passes, so it is flipped on demo
+    first. Migration 59, off by default. docs/todo/016.
+    """
+    return _on(rs, "re_vol_regime_feature_enabled")
+
+
 def require_proven_edge(rs: dict) -> bool:
     """Must the Reversal Engine's edge model have PROVEN itself before any
     Reversal order is placed?
@@ -245,9 +258,9 @@ def cme_context_enabled(rs: dict) -> bool:
 
     **Nothing consumes this yet, and that is deliberate.** There is no CME
     client, no entitlement and no ingest in this repo, so turning the switch
-    on records the intent and changes no decision the engine makes. Same
-    shape as `vol_target_sizing_enabled`, which has said so on the card
-    since 2026-09-11.
+    on records the intent and changes no decision the engine makes. That was
+    `vol_target_sizing_enabled`'s shape from 2026-09-11 until docs/todo/016
+    wired it into the Reversal Engine's sizing (2026-10-11).
 
     Why the switch exists at all: spot XAUUSD on this broker publishes
     bid/ask and no Last, so there is no trade side to read and "volume"

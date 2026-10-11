@@ -18,8 +18,8 @@ the measurements already raised:
   * **fill delay** -- item 040's cohort: sub-five-minute fills lost $2,142
 
 `extra_axes` exists so the caller can add regime without this module
-growing a fourth implementation of regime classification; the codebase
-already has three.
+growing another implementation of regime classification; the codebase
+already has four live ones, listed in docs/system/domains/engines/README.md.
 """
 from __future__ import annotations
 

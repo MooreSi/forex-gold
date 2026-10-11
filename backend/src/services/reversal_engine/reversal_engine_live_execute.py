@@ -18,6 +18,7 @@ import logging
 import time as _time
 
 from backend.src.services.risk import lot_sizing
+from backend.src.services.risk import vol_target
 from backend.src.services.risk import governor as _gov
 from backend.src.services.risk import capability_gates as _caps
 import time
@@ -307,7 +308,7 @@ class _LiveExecuteMixin:
                     fresh_feats = re_ml.extract_features(fresh_sig, win_rate)
                     _edge_feats = fresh_feats
                     if fresh_feats:
-                        _fp = re_ml.predict(fresh_feats)
+                        _fp = re_ml.predict(re_ml.with_vol_tail(fresh_feats, fresh_sig))
                         _fill_prediction = _fp
                         if _fp is not None:
                             fresh_prob = _fp
@@ -646,8 +647,11 @@ class _LiveExecuteMixin:
             # Same default resolve_open_trade_params used for this signal.
             _rs = await db_module.to_db_thread(db_module.get_risk_settings)
             _balance = await get_trading_balance(self._bridge, 1000.0)
-            lot_size = lot_sizing.template_lot(
-                _rs, _template, price, stop_loss, _balance, suggest_lot_size).lot
+            _sized = lot_sizing.template_lot(
+                _rs, _template, price, stop_loss, _balance, suggest_lot_size)
+            # Untouched unless vol_target_sizing_enabled is on (docs/todo/016).
+            lot_size = await vol_target.scale_lot(
+                _sized.lot, _rs, source="Reversal Engine", fixed=_sized.fixed)
             try:
                 lot_sizing.refuse_unplaceable(lot_size, _rs)
             except lot_sizing.UnplaceableLot as exc:

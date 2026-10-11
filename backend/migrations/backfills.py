@@ -248,6 +248,26 @@ def _dpm_tg_source(conn) -> None:
     )
 
 
+def _pnl_columns_follow_the_broker(conn) -> None:
+    """docs/todo/bugs/049: profit sync used to correct net_pnl to the broker's
+    figure and leave gross_pnl and realised_pnl on the close-time estimate.
+    Before sync the close path moves realised_pnl and net_pnl together, so on
+    a synced row their difference IS the correction that was missed; add it
+    to both. WHERE-shaped, not marker-gated: a repaired row has realised =
+    net and is never touched again, and a row synced later by an older
+    checkout sharing this database is repaired on the next boot. Unsynced
+    rows (mt5_profit NULL) have nothing true to repair from."""
+    execute_tolerant(
+        conn,
+        "UPDATE vantage_simulated_trades SET "
+        " gross_pnl = COALESCE(gross_pnl,0) + (net_pnl - COALESCE(realised_pnl,0)),"
+        " realised_pnl = net_pnl "
+        "WHERE status='closed' AND mt5_profit IS NOT NULL AND net_pnl IS NOT NULL"
+        " AND ABS(net_pnl - COALESCE(realised_pnl,0)) >= 0.01",
+        "pnl_columns_follow_the_broker",
+    )
+
+
 # Applied in order on every boot. Order matters: the rebrands run before the
 # DPM backfill so the copied tg_source is already the corrected string, and
 # order_type/instant-prefix corrections keep their historical position.
@@ -263,6 +283,7 @@ BACKFILLS: list = [
     # upstream: the rename heal folds rows the rebrands have already renamed.
     ("gd2_channel_rename_heal", _gd2_channel_rename_heal),
     ("anchor_tp_pips_units", _anchor_tp_pips_units),
+    ("pnl_columns_follow_the_broker", _pnl_columns_follow_the_broker),
 ]
 
 

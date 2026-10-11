@@ -19,6 +19,7 @@ import asyncio
 import logging
 
 from backend.src.services.risk import governor as _gov
+from backend.src.services.signals import contradiction_review as _review
 from backend.src.services.risk import lot_sizing
 import time
 import uuid
@@ -277,6 +278,14 @@ async def process_instant_entry(
     if _ime_bias_block:
         log.info("[IME] Instant %s blocked — %s", direction, _ime_bias_block)
         _dl(False, str(_ime_bias_block))
+        return
+
+    # Contradiction review (handover 041), the same own-copy reason again.
+    # Off unless ticked; with no opposing signal it reads nothing.
+    _ime_cr_ok, _ime_cr_reason = await _review.review_source(rs, bridge, channel_name, direction)
+    if not _ime_cr_ok:
+        log.info("[IME] Instant %s blocked — %s", direction, _ime_cr_reason)
+        _dl(False, _ime_cr_reason)
         return
 
     tick = await bridge.get_tick()

@@ -39,7 +39,7 @@ from backend.src.db import database as db_module
 from backend.src.services.trading import signal_state_repo as _slots
 from backend.src.services.broker import ea_bridge
 from backend.src.services.trading import trade_repo
-from backend.src.services.signals import repo as signals_repo
+from backend.src.services.signals import repo as signals_repo, contradiction_review as _review
 from backend.src.services.broker import ea_bridge as ea_bridge
 from backend.src.services.trading.open_trade import open_trade as _real_open_trade
 from backend.src.services.trading.send_dedup import send_outcome_is_unknown
@@ -321,7 +321,8 @@ async def _execute_auto_signal(
     # and blocking it would strand that position on its provisional stop.
     # Makes no bridge call while the toggle is off.
     _bias_reason = _gov.htf_bias_blocks(
-        parsed.get("direction", ""), await _gov.current_htf_bias(bridge, rs), rs)
+        parsed.get("direction", ""), await _gov.current_htf_bias(bridge, rs), rs) or (
+        await _review.review_source(rs, bridge, channel_name, parsed.get("direction", "")))[1]
     # The caller's list only knows about positions, so opens in flight are
     # added here from the one definition in signal_state_repo. Resting orders
     # hold no slot (owner, 2026-09-28).
@@ -339,7 +340,7 @@ async def _execute_auto_signal(
                  source_label, _news_reason)
     elif _bias_reason:
         skip_reason = f"Auto-execution skipped — {_bias_reason}"
-        log.info("[%s] Signal blocked by the trend gate: %s",
+        log.info("[%s] Signal blocked by the trend gate or contradiction review: %s",
                  source_label, _bias_reason)
     elif per_signal_skip:
         skip_reason = f"Auto-eval declined signal: {per_signal_skip_reason}"

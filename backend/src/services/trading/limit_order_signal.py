@@ -58,6 +58,7 @@ from backend.src.services.risk import governor as _gov
 from backend.src.services.risk import lot_sizing
 from backend.src.services.risk import pause_message
 from backend.src.services.risk.schedule import check_trading_schedule
+from backend.src.services.signals import contradiction_review as _review
 from backend.src.utils.news_calendar import check_news_blackout
 import time
 import uuid
@@ -301,6 +302,12 @@ async def handle_limit_order_signal(
     if not _news_ok:
         log.info("[LimitRunner] tg_id=%s blocked by news blackout: %s", tg_id, _news_reason)
         return {"skip_reason": f"Limit order skipped — {_news_reason}"}
+    # Contradiction review (handover 041): off unless ticked.
+    _cr_ok, _cr_reason = await _review.review_source(
+        rs, bridge, channel_name, str(parsed.get("direction") or ""))
+    if not _cr_ok:
+        log.info("[LimitRunner] tg_id=%s blocked: %s", tg_id, _cr_reason)
+        return {"skip_reason": f"Limit order skipped — {_cr_reason}"}
 
     from backend.src.services.broker import ea_bridge as _ea_mod
     _ea = _ea_mod.get_instance()

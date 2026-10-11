@@ -145,8 +145,12 @@ export function useDashboardController() {
   // the operator would act on. `useSettingsResource` is the read the Risk
   // section uses; it also owns a save path this screen deliberately has none
   // of, so this is the plain GET.
+  //
+  // Keyed by its URL, not a nickname: a save through `useSettingsResource`
+  // invalidates the poll keyed by the URL it wrote, which is how a limit
+  // changed on the Trading tab is showing here when the operator comes back.
   const risk = usePoll<Record<string, unknown>>(
-    "settings/risk",
+    "/api/settings/risk",
     useCallback(() => api.get<Record<string, unknown>>("/api/settings/risk"), []),
     60_000,
   );

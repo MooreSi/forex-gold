@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/api/client";
+import { invalidatePoll } from "@/hooks/usePoll";
 
 export interface SettingsResource<T> {
   data: T | null;
@@ -71,6 +72,10 @@ export function useSettingsResource<T>(path: string): SettingsResource<T> {
           : await api.post<T>(path, body);
         setData(opts?.reread ? await api.get<T>(path) : answer);
         setVersion((v) => v + 1);
+        // A screen polling this URL (the Dashboard's limits card) must not
+        // come back showing what was stored before this save. Polls that read
+        // a settings URL are keyed by that URL for exactly this.
+        invalidatePoll(path);
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
       } finally {

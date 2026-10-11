@@ -700,3 +700,12 @@ tests cover mutation before failure, nonfinite state, recovery and restart.
 `services/reversal_engine/evidence/` owns a separate WAL database and background collectors, attached to the research loop lifecycle. Broker labels link tickets plus signal IDs, preserve real initial risk and total partial/runner cashflows, and retain immutable decision features. Separate commission and millisecond deal time are exposed by the bridge history readers; full cashflow labels require a complete position history. Existing order/close bookkeeping and the virtual champion are unchanged. Exact order-submit times are not exposed and remain null; raw broker times retain their server-time basis.
 
 The default free stack uses the existing cached Forex Factory calendar and delayed Yahoo GC=F bars, not actual releases or exchange order-book depth. Optional Trading Economics and Databento collectors require explicit enablement/credentials; optional MLflow REST export has a restart-safe local outbox. Arrival-aware joins exclude revisions received after a decision. Broker candidates and artifact datasets are grouped by policy/environment; insufficient or unmeasured-cost evidence cannot qualify for review, and no candidate auto-promotes. See [collector configuration and limitations](../../../../backend/src/services/reversal_engine/evidence/README.md).
+
+- **Breakout's dual-bias gate is ON (2026-10-11, bugs/060, owner).** Applied
+  as a stored value once per database (`adaptive_params.apply_owner_decisions`,
+  marker `bo_owner:dual_bias_on_2026_10_11`), not as a new default: every
+  node's `bo_config` held `bo_ap:require_dual_bias = 0.0`, which `get()`
+  reads ahead of the default. The param is `tuner_locked`, so the nightly AI
+  analysis cannot turn it off again. **Adaptive params that are owner
+  decisions go through `_OWNER_DECISIONS`, not the default**, or the stored
+  value silently wins.

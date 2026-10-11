@@ -25,6 +25,7 @@ from typing import Any, Optional
 from backend.src.db import database as db_module
 from backend.src.services.signals import repo as signals_repo
 from backend.src.services.signals import tg_repo
+from backend.src.services.signals import contradiction_review as _contradiction_review
 from backend.src.services.broker import ea_templates as ea_templates
 from backend.src.services.trading.close_trade import get_trading_balance
 from backend.src.services.trading.fees_sizing import suggest_lot_size
@@ -230,6 +231,13 @@ async def resolve_open_trade_params(
     if not _sched_ok:
         raise ValueError(f"Trading Schedule: {_sched_reason} (Trading > Schedule)")
 
+    # Contradiction review (handover 041), the shared open path's copy:
+    # Telegram zone fills, the engines. Off unless ticked.
+    _cr_ok, _cr_reason = await _contradiction_review.review_source(
+        rs, bridge, _ch_src_early, str(sig.get("direction") or ""))
+    if not _cr_ok:
+        raise ValueError(f"{_cr_reason} (Risk > Exposure)")
+
     # News blackout (Trading > News) -- same automated-only reach as the
     # schedule gate above, so it covers Telegram-copied signals and both
     # engines' signals from this one place. The engines also check it earlier
@@ -276,6 +284,7 @@ async def resolve_open_trade_params(
         #                  (app just started, API unconfigured or down),
         #                  which the old `or rs["trade_strategy"]` did not.
         from backend.src.services.positions import core_auto_template as _auto
+        _regime = await _auto.live_regime(bridge, dpm_candles, rs)
         _rec = db_module.get_channel_strategy_rec(_ch_src_early)
         strategy = (_rec.get("strategy") or "").strip()
         # A stored rec outlives the rules that produced it, so it is checked
@@ -297,14 +306,14 @@ async def resolve_open_trade_params(
             )
         if _auto.is_stand_down(strategy):
             raise ValueError(
-                f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
+                f"Auto: {_auto.describe_cell(_ch_src_early, _regime)} "
                 f"(Trading > Schedule: Auto)"
             )
         if not strategy:
-            strategy = _auto.baseline_for(_ch_src_early, _auto.regime_from_candles(dpm_candles))
+            strategy = _auto.baseline_for(_ch_src_early, _regime)
             if _auto.is_stand_down(strategy):
                 raise ValueError(
-                    f"Auto: {_auto.describe_cell(_ch_src_early, _auto.regime_from_candles(dpm_candles))} "
+                    f"Auto: {_auto.describe_cell(_ch_src_early, _regime)} "
                     f"(Trading > Schedule: Auto)"
                 )
     elif _ch_override:

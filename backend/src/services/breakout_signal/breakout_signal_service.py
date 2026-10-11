@@ -79,6 +79,7 @@ def init(bridge: "MT5BridgeClient") -> "BreakoutEngine":
         from backend.src.config import USER_DATA_DIR
         data_dir = USER_DATA_DIR / "data"
         bdb.init(str(data_dir / "breakout_signal.db"))
+        ap.apply_owner_decisions()
         bo_ml.init(data_dir)
         _instance = BreakoutEngine(bridge)
     return _instance

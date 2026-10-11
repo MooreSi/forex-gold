@@ -501,14 +501,16 @@ only, every source.
   **The trigger is the same local-table judgement as the halt**, not the MT5
   figure the dashboard shows. **Not yet run on a demo account.**
 
-- **A profit target, once reached, stays reached for the day** (2026-10-05,
-  bugs/064, handover 038 option A, provisional). `risk/schedule.py`'s
-  `TARGET_REACHED_KEY` latches the daily target and each window's target the
-  first time the gate *or the header badge* sees it reached; it expires at
-  midnight by construction. Resume is still the only way back in. Raising the
-  target above the latched level releases it; lowering it does not. Before
-  this, a later loss (once, the guard's own force-close) re-opened trading.
-  **Not yet run on a demo account.**
+- **A profit target follows the running total; a loss below it re-opens
+  trading** (2026-10-11, handover 038 answered B). `risk/schedule.py`'s
+  `_target_reached(pnl, target)` is `pnl >= target`, asked fresh every time,
+  for the daily target and each window's target. The 2026-10-05 option A
+  latch (`TARGET_REACHED_KEY`) was removed and its stored row is no longer
+  read. A loss that leaves the total at or above the target keeps trading
+  stopped. Resume past today's target is unchanged. What stopped the guard's
+  own force-close being the re-opening loss is that the limit route now asks
+  the schedule (bugs/064 defect 2). Pinned by
+  `tests/risk/test_daily_target_follows_the_day.py`.
 
 ## Tests that write "today's" closes break at the rollover (2026-10-07)
 

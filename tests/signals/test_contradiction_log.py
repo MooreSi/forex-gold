@@ -192,3 +192,27 @@ class TestTheReport:
 
     def test_an_empty_study_reports_nothing_rather_than_zeroes(self, study):
         assert study.report() == []
+
+
+class TestTheReviewAlsoFeedsTheBus:
+    """The contradiction review (docs/simon-handover/041, 2026-10-11) needs
+    Telegram signals on the bus to see channel-vs-channel and
+    channel-vs-engine at all. With the review on and the study off, the bus
+    gets the row and the study records nothing."""
+
+    REVIEW_ONLY = {"tg_contradiction_log_enabled": 0, "contradiction_review_enabled": 1}
+
+    def test_the_review_alone_puts_the_signal_on_the_bus(self, study):
+        _note(self.REVIEW_ONLY)
+        rows = _bus_rows()
+        assert len(rows) == 1
+        assert rows[0]["source_kind"] == c.KIND_TELEGRAM
+        assert rows[0]["source_name"] == "Gold Diggers VIP"
+
+    def test_the_review_alone_records_no_study_rows(self, study):
+        _note(self.REVIEW_ONLY)
+        assert study.rows() == []
+
+    def test_both_off_still_writes_nothing(self, study):
+        _note({"tg_contradiction_log_enabled": 0, "contradiction_review_enabled": 0})
+        assert _bus_rows() == []

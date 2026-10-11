@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetPolls, usePoll } from "../usePoll";
+import { invalidatePoll, resetPolls, usePoll } from "../usePoll";
 
 beforeEach(() => {
   resetPolls();
@@ -166,6 +166,38 @@ describe("usePoll", () => {
     expect(fetcher).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads a cached entry on the next mount once it has been invalidated", async () => {
+    // The Dashboard unmounts while the Trading tab is open. A risk limit saved
+    // there left the Dashboard showing the OLD limit on return, because a
+    // remount onto cached data waits a whole interval (60s for the limits)
+    // before asking again (owner, 2026-10-11: daily loss changed to 8%, the
+    // card still said 10%).
+    const fetcher = vi.fn().mockResolvedValueOnce("10%").mockResolvedValue("8%");
+    const first = renderHook(() => usePoll("limits", fetcher, 60_000));
+    await waitFor(() => expect(first.result.current.data).toBe("10%"));
+    first.unmount();
+
+    invalidatePoll("limits");
+
+    const back = renderHook(() => usePoll("limits", fetcher, 60_000));
+    await waitFor(() => expect(back.result.current.data).toBe("8%"));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-reads at once when an entry with a live subscriber is invalidated", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce("10%").mockResolvedValue("8%");
+    const { result } = renderHook(() => usePoll("limits-live", fetcher, 60_000));
+    await waitFor(() => expect(result.current.data).toBe("10%"));
+
+    act(() => invalidatePoll("limits-live"));
+
+    await waitFor(() => expect(result.current.data).toBe("8%"));
+  });
+
+  it("ignores invalidating a key nobody has polled", () => {
+    expect(() => invalidatePoll("never-polled")).not.toThrow();
   });
 
   it("stops the interval when the last subscriber unmounts", async () => {

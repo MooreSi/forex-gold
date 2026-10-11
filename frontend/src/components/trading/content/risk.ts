@@ -201,6 +201,11 @@ export const RISK_GROUPS: RiskGroup[] = [
         kind: "number",
         dependsOn: { key: "internal_hedge_mode", label: "the Net Exposure Cap mode" },
       },
+      {
+        key: "contradiction_review_enabled",
+        label: "Contradiction review", kind: "toggle",
+        hint: "When two sources disagree within 10 minutes, the AI reads the market and only the side it favours is taken. Never closes an open trade.",
+      },
     ],
   },
   {
@@ -224,6 +229,11 @@ export const RISK_GROUPS: RiskGroup[] = [
         label: "Combined profit to harvest at ($)", kind: "number",
         hint: "Combined floating profit across all open positions. Found live at $75 on 2026-09-22 with no control on this screen at all — it had been dropped in the React port, so it was closing real positions where nobody could see it.",
         dependsOn: { key: "global_harvest_enabled", label: "harvesting" },
+      },
+      {
+        key: "auto_template_h1_regime_enabled", kind: "toggle",
+        label: "Auto strategy reads the H1 trend",
+        hint: "Channels set to Auto pick their template from the last 6 closed hourly bars (trending or ranging) instead of the 5-minute cache, which is empty unless adaptive management is on.",
       },
     ],
   },

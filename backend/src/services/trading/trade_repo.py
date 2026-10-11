@@ -324,36 +324,6 @@ def apply_partial_close_with_reason(trade_id: str, now: float, lots_to_close: fl
 
 # ── Profit sync ──────────────────────────────────────────────────────────────
 
-def apply_profit_sync(trade_id: str, mt5_profit: float) -> None:
-    """First-time sync corrects the simulated balance against the real MT5
-    figure; every sync stamps mt5_profit. One transaction, as inline."""
-    with transaction() as conn:
-        existing = row_to_dict(conn.execute(
-            "SELECT mt5_profit, net_pnl FROM vantage_simulated_trades WHERE trade_id=?",
-            (trade_id,),
-        ).fetchone())
-        if existing and existing.get("mt5_profit") is None:
-            our_estimate = float(existing.get("net_pnl") or 0)
-            correction = round(mt5_profit - our_estimate, 4)
-            if abs(correction) >= 0.01:
-                conn.execute(
-                    "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
-                    (correction,),
-                )
-                conn.execute(
-                    "UPDATE vantage_simulated_trades SET net_pnl=? WHERE trade_id=?",
-                    (mt5_profit, trade_id),
-                )
-                log.info(
-                    "[ProfitSync] Balance corrected for %s: estimated=%.2f mt5=%.2f adj=%.2f",
-                    trade_id, our_estimate, mt5_profit, correction,
-                )
-        conn.execute(
-            "UPDATE vantage_simulated_trades SET mt5_profit=? WHERE trade_id=?",
-            (mt5_profit, trade_id),
-        )
-
-
 def fetch_mt5_profit(trade_id: str):
     with db() as conn:
         return conn.execute(
@@ -762,9 +732,16 @@ def apply_profit_sync(trade_id: str, mt5_profit: float, risk_total: float,
                     "UPDATE vantage_simulation_account SET balance = balance + ? WHERE id=1",
                     (correction,),
                 )
+                # gross_pnl and realised_pnl get the same correction, added
+                # rather than overwritten: after a partial close gross_pnl
+                # holds only the final leg. Correcting net_pnl alone left
+                # them on the estimate -- -$44,821 against a real -$264
+                # (docs/todo/bugs/049).
                 conn.execute(
-                    "UPDATE vantage_simulated_trades SET net_pnl=? WHERE trade_id=?",
-                    (mt5_profit, trade_id),
+                    "UPDATE vantage_simulated_trades SET net_pnl=?,"
+                    " gross_pnl=COALESCE(gross_pnl,0)+?,"
+                    " realised_pnl=COALESCE(realised_pnl,0)+? WHERE trade_id=?",
+                    (mt5_profit, correction, correction, trade_id),
                 )
                 applied = (our_estimate, correction)
         if risk_total > 0:

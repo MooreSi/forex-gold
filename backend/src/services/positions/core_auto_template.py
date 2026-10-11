@@ -118,6 +118,43 @@ def regime_from_candles(candles: Optional[list]) -> str:
         return "ranging"
 
 
+# Auto's regime from H1 instead (docs/todo/014, owner 2026-10-11: "wire in
+# and make it a setting"). The DPM M5 cache above is empty on an account
+# with dpm_enabled = 0, which made every Auto pick the "ranging" cell. The
+# window and threshold are the ones the 2026-10-06 study reported by.
+H1_REGIME_SETTING = "auto_template_h1_regime_enabled"
+H1_REGIME_HOURS = 6
+H1_REGIME_THRESHOLD = 0.4
+
+
+def h1_regime_enabled(rs: Optional[dict] = None) -> bool:
+    try:
+        if rs is None:
+            from backend.src.db import database as _db
+            rs = _db.get_risk_settings()
+        return bool(int(rs.get(H1_REGIME_SETTING, 0) or 0))
+    except Exception:
+        return False
+
+
+async def live_regime(bridge, dpm_candles: Optional[list], rs: Optional[dict] = None) -> str:
+    """The regime every Auto site uses. Setting off: regime_from_candles on
+    the M5 cache, exactly as before, and no bridge call. On: the last
+    H1_REGIME_HOURS CLOSED H1 bars (the newest bar from get_candles is still
+    forming) -> "trending" or "ranging"; too few bars or a failed read is
+    "ranging", the same defensive default."""
+    if not h1_regime_enabled(rs):
+        return regime_from_candles(dpm_candles)
+    try:
+        from backend.src.services.market import h1_regime
+        bars = list(await bridge.get_candles("H1", H1_REGIME_HOURS + 1) or [])[:-1]
+        r = h1_regime.read(bars, H1_REGIME_HOURS, H1_REGIME_THRESHOLD)
+    except Exception as exc:
+        log.debug("[AutoTemplate] H1 regime read failed: %s", exc)
+        r = None
+    return "trending" if r is not None and r.regime == "trend" else "ranging"
+
+
 def _canon(source: str) -> str:
     """Fold a decorated source label back to the channel key used above.
 
@@ -328,7 +365,7 @@ async def run_auto_template_cycle(
     if not sources:
         return
 
-    regime = regime_from_candles(candles)
+    regime = await live_regime(getattr(runtime, "_bridge", None), candles)
     regime_flipped = (state.last_regime is not None and regime != state.last_regime)
     changed = apply_baselines(
         regime, sources,

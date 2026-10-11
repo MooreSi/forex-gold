@@ -113,7 +113,12 @@ PARAMS: dict[str, dict] = {
         # actually been doing for its whole life. Turning it back to 1.0 is a
         # real strategy change: it wants the backfill and attribution in
         # bugs/060 first, then the owner, then a demo session.
-        "default": 0.0, "min": 0.0, "max": 1.0,
+        #
+        # 2026-10-11: the owner turned it ON. Applied as a stored value by
+        # apply_owner_decisions, not as a new default (every node's bo_config
+        # already holds 0.0, which get() would keep reading), and locked so
+        # the nightly tuner cannot switch it back off.
+        "default": 0.0, "min": 0.0, "max": 1.0, "tuner_locked": True,
         "desc": "Require BOTH H1 and H4 bias to agree with direction (1=strict, 0=H1 only)",
     },
     "min_break_atr_frac": {
@@ -246,6 +251,24 @@ def apply_adjustment(key: str, raw_value: float, reason: str = "") -> Optional[f
         "claude_decision": f"{key}: {old_val:.4g} → {clamped:.4g}  |  {reason}",
     })
     return clamped
+
+
+# Owner decisions applied once per database, by stored value: (marker, key,
+# value). Once the marker is set the value is never re-imposed, so a later
+# deliberate change stands.
+_OWNER_DECISIONS = (
+    ("bo_owner:dual_bias_on_2026_10_11", "require_dual_bias", 1.0),  # bugs/060
+)
+
+
+def apply_owner_decisions() -> None:
+    for marker, key, value in _OWNER_DECISIONS:
+        if _tdb().get_config(marker, ""):
+            continue
+        old_val = get(key)
+        _tdb().set_config(_DB_PREFIX + key, str(value))
+        _tdb().set_config(marker, "1")
+        _log.info("[BO-AP] %s: %.4g -> %.4g (owner decision, %s)", key, old_val, value, marker)
 
 
 def reset_to_defaults() -> None:

@@ -42,6 +42,9 @@ interface PollEntry<T> {
   state: PollState<T>;
   timer: ReturnType<typeof setInterval> | null;
   inFlight: Promise<void> | null;
+  /** Set by `invalidatePoll`: the cached data is known to be out of date, so
+   *  the next mount reads again instead of waiting out an interval. */
+  stale: boolean;
 }
 
 export interface PollState<T> {
@@ -64,6 +67,7 @@ function runOnce<T>(entry: PollEntry<T>): Promise<void> {
   // queue up requests faster than they complete.
   if (entry.inFlight) return entry.inFlight;
 
+  entry.stale = false;
   entry.state = { ...entry.state, loading: true };
   emit(entry);
 
@@ -127,6 +131,26 @@ function stopTimer<T>(entry: PollEntry<T>) {
   entry.timer = null;
 }
 
+/**
+ * The data behind `key` has changed: read it again.
+ *
+ * A panel is unmounted while another tab is open, and a remount onto cached
+ * data does not re-read until its interval comes round. That is right for
+ * live data, which nobody on this screen could have changed. It is wrong for
+ * something the operator has just saved elsewhere: the Dashboard went on
+ * showing a 10% daily loss limit for up to a minute after it was saved as 8%
+ * on the Trading tab (owner, 2026-10-11).
+ *
+ * With a live subscriber this reads now; otherwise the next mount does. The
+ * cached data stays on screen meanwhile rather than blanking the panel.
+ */
+export function invalidatePoll(key: string): void {
+  const entry = registry.get(key);
+  if (!entry) return;
+  entry.stale = true;
+  if (entry.subscribers.size > 0) void runOnce(entry);
+}
+
 /** Test seam. Leaving a live interval behind between tests is how one test's
  *  fetch shows up as another's failure. */
 export function resetPolls(): void {
@@ -146,6 +170,7 @@ function entryFor<T>(
     state: { data: null, error: null, loading: false, updatedAt: null },
     timer: null,
     inFlight: null,
+    stale: false,
   };
   registry.set(key, entry as PollEntry<unknown>);
   return entry;
@@ -178,7 +203,8 @@ export function usePoll<T>(
     // Populate before the first tick, exactly as the NiceGUI pages did with
     // `ensure_future(_refresh())` beside `ui.timer(n, _refresh)`. Without it
     // the panel is empty for a whole interval on every page load.
-    if (entry.state.updatedAt === null) void runOnce(entry);
+    // And again on a mount after `invalidatePoll`, for the same reason.
+    if (entry.state.updatedAt === null || entry.stale) void runOnce(entry);
     syncTimer(entry);
     return () => {
       entry.subscribers.delete(setState);

@@ -77,32 +77,43 @@ class TestTheProducersCallIt:
         assert "contradiction_log" in src
 
 
-class TestItIsNotOnTheExecutionPath:
-    """Stage 1 records and decides nothing. The resolver reaching a place
-    that can place or refuse a trade is a separate change needing the owner
-    and a demo session -- this is what would notice it arriving quietly."""
+class TestOnlyTheReviewIsOnTheExecutionPath:
+    """Stage 1 recorded and decided nothing, and this class failed if the
+    resolver reached a place that can place or refuse a trade.
 
-    FORBIDDEN = (
+    2026-10-11 the owner asked for exactly that (handover 041: "add into risk
+    settings a contradiction review ... to determine which one should be
+    executed"). So the boundary moved, deliberately and in the open: the
+    execution routes may call `contradiction_review`, which is off unless
+    `contradiction_review_enabled` is ticked, and still never the study's
+    policy set (`contradiction_log`, or `contradiction.POLICIES` directly).
+    Which routes call the review is pinned in test_contradiction_review.py.
+    """
+
+    EXECUTION = (
         "backend/src/services/signals/resolution.py",
         "backend/src/services/risk/governor.py",
         "backend/src/services/trading/open_from_signal.py",
         "backend/src/services/signals/pending_activation.py",
-        "backend/src/services/signals/scan_auto_execute.py",
+        "backend/src/services/trading/scan_auto_execute.py",
+        "backend/src/services/trading/instant_entry.py",
+        "backend/src/services/trading/limit_order_signal.py",
     )
 
-    @pytest.mark.parametrize("rel", FORBIDDEN)
-    def test_no_execution_gate_imports_the_resolver(self, rel):
-        path = ROOT / rel
-        if not path.exists():
-            pytest.skip(f"{rel} does not exist")
-        assert "contradiction" not in path.read_text(encoding="utf-8"), \
-            f"{rel} reached for the contradiction resolver — that needs sign-off"
+    @pytest.mark.parametrize("rel", EXECUTION)
+    def test_no_execution_gate_reaches_the_study(self, rel):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        assert "contradiction_log" not in src, f"{rel} reached for the study"
+        assert "POLICIES" not in src, f"{rel} reached for the study's policy set"
+        for line in src.splitlines():
+            if "import" in line and "contradiction" in line:
+                assert "contradiction_review" in line, f"{rel}: {line.strip()}"
 
     def test_the_negative_control(self):
-        """The check above passes trivially if the string never appears
-        anywhere. Prove the same search finds it where it does belong."""
-        src = _src("backend/src/services/signals/contradiction_log.py")
-        assert "contradiction" in src
+        """The import check above passes trivially if nothing imports any
+        contradiction module. Prove it sees the one that does."""
+        src = _src("backend/src/services/signals/resolution.py")
+        assert any("import" in l and "contradiction_review" in l for l in src.splitlines())
 
 
 class TestTheReadout:

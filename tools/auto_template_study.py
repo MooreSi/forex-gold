@@ -44,37 +44,9 @@ MIN_N = 20
 
 
 # ── H1 regime: trend or range by efficiency ratio ─────────────────────────
-# Lives here, not in services/, because nothing in the app uses it: the
-# study found no regime cell worth wiring into Auto (docs/todo/014, Results).
-# Why this measure and not dpm_engine.detect_regime: on 2026-10-05 (choppy)
-# and 2026-10-06 (a rally) that classifier said "trending" ~60% of both days;
-# the efficiency ratio over the day was 0.05 against 0.21.
-@dataclass(frozen=True)
-class RegimeRead:
-    regime: str      # "trend" | "range"
-    direction: str   # "up" | "down" | "flat"
-    er: float
-
-
-def read(bars: Sequence[dict], hours: int, threshold: float) -> Optional[RegimeRead]:
-    """The regime over the last `hours` closed H1 bars, or None with fewer."""
-    if hours <= 0 or len(bars) < hours:
-        return None
-    window = bars[-hours:]
-    net = float(window[-1]["close"]) - float(window[0]["open"])
-    path = sum(abs(float(b["close"]) - float(b["open"])) for b in window)
-    er = round(abs(net) / path, 4) if path > 0 else 0.0
-    direction = "up" if net > 0 else "down" if net < 0 else "flat"
-    regime = "trend" if er >= threshold and direction != "flat" else "range"
-    return RegimeRead(regime, direction, er)
-
-
-def side(r: Optional[RegimeRead], trade_direction: str) -> str:
-    """"with" / "against" the trend, or "flat" in a range or when unknown."""
-    if r is None or r.regime != "trend":
-        return "flat"
-    buy = str(trade_direction).upper() == "BUY"
-    return "with" if (r.direction == "up") == buy else "against"
+# Moved to services/market/h1_regime.py on 2026-10-11, when Auto started
+# reading it behind a setting (docs/todo/014). Re-exported for the study.
+from backend.src.services.market.h1_regime import RegimeRead, read, side  # noqa: E402,F401
 
 
 def canon_source(src: str) -> str:

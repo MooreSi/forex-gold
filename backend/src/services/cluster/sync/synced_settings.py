@@ -180,4 +180,8 @@ SYNCED_SETTINGS_KEYS = (
     "daily_goal_enabled", "daily_goal_mode", "daily_goal_value", "tpa_live_execution",
     # Its breakeven tickbox (migration 56): it acts on whichever node trades.
     "daily_goal_protect_be",
+    # Contradiction review (migration 59): it refuses on whichever node trades.
+    "contradiction_review_enabled",
+    # Auto's H1 regime (migration 60): Auto picks on whichever node trades.
+    "auto_template_h1_regime_enabled",
 )

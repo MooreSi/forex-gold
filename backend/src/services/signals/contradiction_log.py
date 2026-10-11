@@ -173,10 +173,15 @@ def note_signal(rs: dict, *, source_kind: str, source_name: str,
     Never raises, including the bus write -- `write_signal_bus` already
     swallows and returns 0.
     """
-    if not enabled(rs):
+    # The contradiction review (2026-10-11) reads the same bus and needs
+    # Telegram rows on it; the study's observation stays the study's.
+    from backend.src.services.signals import contradiction_review as _review
+    study = enabled(rs)
+    if not (study or _review.enabled(rs)):
         return
-    observe(rs, source_kind=source_kind, source_name=source_name,
-            direction=direction, symbol=symbol, candidate_ref=candidate_ref, at=at)
+    if study:
+        observe(rs, source_kind=source_kind, source_name=source_name,
+                direction=direction, symbol=symbol, candidate_ref=candidate_ref, at=at)
     try:
         db_module.write_signal_bus(
             source_name, direction, ttl_seconds=TELEGRAM_TTL_S,

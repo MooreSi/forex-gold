@@ -292,4 +292,19 @@ _RECENT: list[tuple[int, str, object]] = [
         "CREATE TABLE IF NOT EXISTS ai_fallback_not_signal ("
         " text_hash TEXT PRIMARY KEY, classified_at REAL NOT NULL)",
     ]),
+
+    # Risk > Exposure > Contradiction review (handover 041, owner 2026-10-11):
+    # when two sources disagree, the market read and the AI decide which side
+    # runs (services/signals/contradiction_review.py). Off by default: it can
+    # refuse a trade, so nothing changes on upgrade until it is ticked.
+    (59, "Contradiction review between signal sources (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN contradiction_review_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
+
+    # Risk > Managing an open trade > "Auto strategy reads the H1 trend"
+    # (docs/todo/014, owner 2026-10-11). Off by default: Auto keeps reading
+    # the M5 cache exactly as before until it is ticked.
+    (60, "Auto templates read the H1 regime (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN auto_template_h1_regime_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

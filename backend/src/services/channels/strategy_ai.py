@@ -208,6 +208,11 @@ async def evaluate_channels(engine, cfg: dict) -> dict[str, dict]:
                         if len(_dpm) >= 20 else rule_regime)
     except Exception:
         _auto_regime = rule_regime
+    # With the H1 regime setting on (docs/todo/014), the label every other
+    # Auto site uses, for the reason given above.
+    from backend.src.services.positions import core_auto_template as _auto_h1
+    if _auto_h1.h1_regime_enabled():
+        _auto_regime = await _auto_h1.live_regime(getattr(engine, "_bridge", None), _dpm)
     hour_utc      = _utc_hour()
     session_label = (
         "Asian"               if hour_utc < 7  else

@@ -406,7 +406,10 @@ def parse_gd2_signal(text: str) -> Optional[dict]:
             entry_low  = entry_high = price
 
     if is_zone:
-        tps = _parse_gd2_zone_targets(text, dm.end())
+        # No "Targets" header: Gold Diggers Scalping's "Gold Now" posts list
+        # plain "TP <price>" lines instead, and without this they never
+        # parsed in full (docs/todo/bugs/061, 2026-10-11).
+        tps = _parse_gd2_zone_targets(text, dm.end()) or _parse_gd2_plain_tps(text)
     elif is_limits:
         # C3: bare "TP <price>" lines; "TP OPEN" skipped by regex
         tps = _parse_gd2_plain_tps(text)

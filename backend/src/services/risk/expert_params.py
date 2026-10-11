@@ -215,6 +215,16 @@ EXPERT_PARAMS: list[ExpertParam] = [
         desc="Trend PA takes no entry from this UTC hour on. 20 with a 12 "
              "start is the replayed New York session.",
     ),
+    ExpertParam(
+        key="auto_regime_min_dwell_ticks", label="Auto: regime must hold for",
+        default=1, min=1, max=30, unit="min", domain="Auto templates",
+        integer=True,
+        desc="An Auto channel changes template only after the new market "
+             "regime has been read on this many one-minute checks in a row. "
+             "1 acts on the first reading, as before this setting existed; "
+             "higher stops an ADX sitting on a cutoff from flipping "
+             "templates (and paying for an AI review) every minute.",
+    ),
 ]
 
 _SPECS: dict[str, ExpertParam] = {p.key: p for p in EXPERT_PARAMS}

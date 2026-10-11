@@ -710,3 +710,55 @@ The default free stack uses the existing cached Forex Factory calendar and delay
   analysis cannot turn it off again. **Adaptive params that are owner
   decisions go through `_OWNER_DECISIONS`, not the default**, or the stored
   value silently wins.
+
+## Regime readers, and the volatility-regime feature (2026-10-11, docs/todo/016)
+
+**There are four live regime classifiers, and they do not agree.** Know which
+one a decision reads before reasoning about "the regime":
+
+| Classifier | Inputs | Read by |
+|---|---|---|
+| `dpm/engine.detect_regime` | ADX on 30 M5 bars, plus ATR spike | DPM trail/BE, Auto templates (`core_auto_template.regime_from_candles`), channel strategy AI |
+| `analytics/read_repo.get_regime_score` | ADX only | Reversal and Breakout ML feature `regime_score`, signal snapshots |
+| `channels/strategy_ai.classify_regime` | H1 ATR/ADX and the hour | AI prompt context and its fallback |
+| `market/indicators.detect_regime` | ADX plus H1/H4 bias | nothing calls it; Breakout's `signal_generator` re-exports it, pinned by `test_the_bounce_engine_backend_is_gone.py` |
+
+`utils/regime.py` is no longer a classifier. `classify_day`,
+`efficiency_ratio` and `bounce_pattern_allowed` died with the Bounce engine
+and were deleted; only the four frozen blocklists remain.
+
+- **`get_regime_score` never had a volatility input.** Its `atr_avg`
+  promotion branch was never reached (no caller passed `atr_avg`), so it was
+  deleted rather than switched on: switching it on would have changed what
+  7,553 stored training vectors mean. `atr` stays in the signature, unread,
+  so the six call sites and a test double keep their shape.
+- **Volatility reaches the Reversal model as an optional tail, not a stored
+  feature.** `reversal_engine/vol_regime.py`: ATR against the median of the
+  engine's own logged ATR (`re_analysis_log`, one row per cycle) over the
+  previous five days, as log(ratio) clamped to ±1.5, neutral 0.0. Behind
+  `re_vol_regime_feature_enabled`, off by default.
+- **Why a tail.** Appending to `FEATURE_NAMES` changes the model width with
+  the switch off, and `_install_batch` replaces the online SGD model when the
+  width changes, which moves every prediction. So the stored vector is
+  untouched, the ratio lives in `re_signals.atr_ratio`, and it joins the
+  vector only when the switch is on: `_get_training_data` and
+  `record_outcome` via `vol_regime.row_tail`, scoring via
+  `ml_engine.with_vol_tail`. Switched either way, the installed model is the
+  old width until the next retrain (every 5 closes); `fit_tail` scores the
+  base vector, or pads the neutral, rather than raising and failing the gate
+  open.
+- **`with_vol_tail` wraps the vector instead of `predict` taking a second
+  argument** because `test_ml_fill_time_rescore.py` patches `predict` with a
+  one-argument double. Both scoring sites call
+  `re_ml.predict(re_ml.with_vol_tail(feats, signal))`, pinned by
+  `test_ml_vol_regime_tail.py`.
+- **The history is reused.** The research loop's minute timer runs
+  `vol_ratio_sweep` whether the switch is on or not, 2,000 rows a pass; a
+  measured row holds a number (0.0 = no reference) and is never re-read. On a
+  copy of the owner's database on 2026-10-11, all 7,553 rows were measured in
+  1.1s, 7,463 (98.8%) with a reference; median ratio 0.99, 90% between 0.63
+  and 1.94.
+- **No evidence yet that it helps.** docs/todo/014 found no regime cell with
+  an edge, and handover 040 found ATR deciles non-monotonic against P&L. A
+  tree model can use a non-monotonic input; whether it does is for a demo
+  session to show, not this note.

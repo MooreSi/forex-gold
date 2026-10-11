@@ -35,6 +35,7 @@ from backend.src.services.risk.governor import (
 )
 from backend.src.services.risk import capability_gates as _caps
 from backend.src.services.risk import lot_sizing
+from backend.src.services.risk import vol_target as _vol_target
 from backend.src.services.risk.strategy_params import get_strategy_params
 from backend.src.services.risk.schedule import check_trading_schedule
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
@@ -748,6 +749,16 @@ async def resolve_open_trade_params(
             raise ValueError(f"Risk Governor blocked trade: {_rg_err}")
         # Fixed lot always wins — RG is authoritative only when no fixed lot is set.
         lot_size = strategy_lot if strategy_lot > 0 else _rg_lot
+
+    # Volatility-target sizing (docs/todo/016): returns lot_size untouched
+    # unless vol_target_sizing_enabled is on AND this is the Reversal Engine's
+    # own risk-derived lot. Fixed lots are exempt on the channel multiplier's
+    # terms; Fixed lots mode reaches a template only through the governor.
+    lot_size = await _vol_target.scale_lot(
+        lot_size, rs, source=_ch_src,
+        fixed=bool(lot_size_override or _sig_lot or _lot_is_template_fixed
+                   or (strategy_lot > 0 and (not _is_template
+                                             or rs.get("risk_governor_enabled")))))
 
     return {
         "sig": sig,

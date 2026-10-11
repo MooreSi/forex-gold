@@ -467,7 +467,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
                 pass
 
             feats = re_ml.extract_features(feat_input, win_rate)
-            prob  = re_ml.predict(feats) if feats else None
+            prob  = re_ml.predict(re_ml.with_vol_tail(feats, feat_input)) if feats else None
             eligible.append((level, direction, sig_data, feats, prob))
 
         signal_created = False

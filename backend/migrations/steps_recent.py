@@ -307,4 +307,11 @@ _RECENT: list[tuple[int, str, object]] = [
     (60, "Auto templates read the H1 regime (off)", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN auto_template_h1_regime_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # The Reversal ML model's volatility-regime input (docs/todo/016). Off:
+    # the model's vector is unchanged. The data is measured either way, so
+    # turning it on reuses the stored history.
+    (61, "Reversal ML: volatility-regime feature (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_vol_regime_feature_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

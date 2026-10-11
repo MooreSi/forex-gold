@@ -21,8 +21,8 @@ engine could ever read measured flow rather than a tick-rule proxy.
 **Nothing, today.** There is no CME feed in this repo -- no client, no
 credentials, no ingest, no column that could hold a contract's volume. This
 switch records the intent and is read by one accessor that nothing consumes
-yet. That is the same shape as `vol_target_sizing_enabled`, which has sat on
-this card since 2026-09-11 saying "NOT YET CONNECTED to the order path".
+yet. That was the shape of `vol_target_sizing_enabled` from 2026-09-11 until
+docs/todo/016 connected it to the Reversal Engine's sizing on 2026-10-11.
 
 The reason it stops here is not effort. CME market data is a paid entitlement
 and choosing one is an owner decision about money and licensing that an agent

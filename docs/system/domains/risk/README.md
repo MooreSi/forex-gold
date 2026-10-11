@@ -522,3 +522,29 @@ failed six of them on 2026-10-07; pinning `time.time()` to a minute past the
 rollover failed about forty. `tests/core/test_giveback_guard._closes` now
 clamps to one second into the day and spaces rows a millisecond apart. A new
 helper that writes today's trades must do the same, or take `day_start=`.
+
+## Volatility-target sizing is wired, off, with the evidence on the card (2026-10-11, docs/todo/016)
+
+`services/risk/vol_target.scale_lot` is now the one caller of
+`sizing_policy.apply`. Called from the end of
+`resolution.resolve_open_trade_params` and from the Reversal limit route's
+template re-size. It returns the lot untouched unless
+`vol_target_sizing_enabled` is on AND the signal's `source_name` is
+"Reversal Engine" AND the lot was risk-derived. Fixed lots (typed override, a
+lot on the signal, a template's fixed anchor, Fixed lots mode) are exempt on
+the channel multiplier's terms. The correlated cap is passed as 0: nothing
+counts open correlated lots, so it stays unwired rather than look enforced.
+The reference ATR is `reversal_engine/vol_regime`, the same five-day median
+the ML feature uses.
+
+- **The owner kept it wired after reading 040** (2026-10-11): off, with the
+  "$1,002 worse than flat" result on the card. The section above still holds.
+  `test_vol_target_sizing.py::test_it_carries_the_measurement_against_it`
+  fails if the card drops it.
+- **The drawdown arm is a no-op today, for a different reason than 040
+  said.** `get_equity_drawdown_pct` selects `peak_balance` from
+  `vantage_simulation_account`, which no longer has that column (bugs/042
+  moved the watermark to app_config). The error is swallowed and it returns
+  0.0, so the scalar is always 1.0. The same reader feeds the ML feature
+  `equity_drawdown_pct`, which is 0 in all 7,553 stored vectors. Not fixed
+  here; raised as its own task.

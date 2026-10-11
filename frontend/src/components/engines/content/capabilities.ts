@@ -47,7 +47,17 @@ export const CAPABILITIES: Capability[] = [
     key: "vol_target_sizing_enabled",
     label: "Volatility-target sizing",
     description:
-      "Scale the position with measured volatility instead of using a flat risk percentage.",
+      "Scales each Reversal Engine lot by how volatile the market is against " +
+      "its own last five days: smaller when ATR is above its median, up to " +
+      "1.5x larger when below (never past Max lot size), and smaller again " +
+      "in a drawdown. Only lots sized from risk % are scaled; a fixed lot " +
+      "(Fixed lots mode, a template's own anchor lot, a lot you typed) is " +
+      "left alone, and no other channel or engine is touched. Measured " +
+      "2026-09-17 on 5,116 of this engine's signals, it would have LOST " +
+      "$1,002 more than a flat size change: here the most volatile markets " +
+      "are the least bad, so it sizes down where it should size up " +
+      "(docs/simon-handover/040, closed: leave it off). If you try it, try " +
+      "it on the demo account. See docs/todo/016.",
   },
   {
     key: "re_ai_tuning_enabled",
@@ -102,6 +112,18 @@ export const CAPABILITIES: Capability[] = [
       label: "Ask the meta-labeller",
       where: "this card",
     },
+  },
+  {
+    key: "re_vol_regime_feature_enabled",
+    label: "Teach the ML model how volatile the market is",
+    description:
+      "Gives the ML model one more input: the current ATR against its own " +
+      "median over the previous five days. The ratio is measured for every " +
+      "signal, past and present, whether this is on or not, so turning it " +
+      "on retrains on the full history at the next retrain (every 5 closes) " +
+      "rather than starting from nothing. It changes which signals the ML " +
+      "gate lets through, so try it on the demo account first. " +
+      "See docs/todo/016.",
   },
   {
     key: "re_require_proven_edge",

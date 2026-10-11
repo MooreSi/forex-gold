@@ -42,7 +42,7 @@ FEATURE_NAMES = [
     "minutes_since_ref_norm",   # minutes since the last real REF signal / 240, clamped [0,1]
     "ref_signals_today_norm",   # real REF signals received so far today / 10, clamped [0,1]
     "news_proximity_norm",      # minutes to next high-impact event / 120, clamped [0,1]; 0=imminent, 1=safe
-    "regime_score",             # trending=1.0, ranging=0.0, volatile=0.5 (derived from ADX+ATR)
+    "regime_score",             # ADX bucket: >=40 1.0, 28-40 0.75, 20-28 0.5, 14-20 0.25, <14 0.0 (no ATR input; see analytics/read_repo)
     "equity_drawdown_pct",      # current drawdown from peak equity [0,1]
     "concurrent_agreement",     # +1 same-dir signal from another engine in last 15min, -1 opposite, 0 none
     "ref_discipline_score",     # 0-1, AI-derived nightly: how closely the reference channel/GD2 stuck to stated SL/sizing that day

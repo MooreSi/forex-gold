@@ -91,6 +91,8 @@ def _run_migrations() -> None:
         "ALTER TABLE re_signals ADD COLUMN xasset_json TEXT",
         # R on the EA template's own exits, replayed (reversal-engine/240).
         "ALTER TABLE re_signals ADD COLUMN tpl_r REAL",
+        # ATR against its own five-day median at creation (docs/todo/016).
+        "ALTER TABLE re_signals ADD COLUMN atr_ratio REAL",
     ]
     for stmt in migrations:
         try:

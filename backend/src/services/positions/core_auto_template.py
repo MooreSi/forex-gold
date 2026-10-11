@@ -324,6 +324,35 @@ class AutoTemplateState:
     """
     last_regime: Optional[str] = None
     last_ai: float = 0.0
+    # A different regime seen on consecutive ticks, not yet acted on.
+    pending_regime: Optional[str] = None
+    pending_ticks: int = 0
+
+
+def _min_dwell_ticks() -> int:
+    """Expert Tunable `auto_regime_min_dwell_ticks`; 1 if it cannot be read."""
+    try:
+        from backend.src.services.risk import expert_params as _ep
+        return max(1, int(_ep.get("auto_regime_min_dwell_ticks")))
+    except Exception:
+        return 1
+
+
+def _settled_regime(state: "AutoTemplateState", observed: str) -> str:
+    """The regime to act on: `observed` once it has held for the dwell, else
+    the current one. With a dwell of 1 this is always `observed`, which is the
+    behaviour before the tunable existed (docs/todo/016)."""
+    if state.last_regime is None or observed == state.last_regime:
+        state.pending_regime, state.pending_ticks = None, 0
+        return observed
+    if observed == state.pending_regime:
+        state.pending_ticks += 1
+    else:
+        state.pending_regime, state.pending_ticks = observed, 1
+    if state.pending_ticks >= _min_dwell_ticks():
+        state.pending_regime, state.pending_ticks = None, 0
+        return observed
+    return state.last_regime
 
 
 AI_INTERVAL_S = 15 * 60
@@ -365,7 +394,9 @@ async def run_auto_template_cycle(
     if not sources:
         return
 
-    regime = await live_regime(getattr(runtime, "_bridge", None), candles)
+    regime = _settled_regime(
+        state, await live_regime(getattr(runtime, "_bridge", None), candles)
+    )
     regime_flipped = (state.last_regime is not None and regime != state.last_regime)
     changed = apply_baselines(
         regime, sources,

@@ -12,6 +12,12 @@ import type { TradeRow } from "../hooks/useClosedTrades";
  *
  * Built from the rows the trade table already fetched rather than a read of
  * its own: the calendar and the table must agree about what a day earned.
+ *
+ * **The day is the backend's `row.day`, on the trading clock** (owner,
+ * 2026-10-10: every day in the app is the Trading Clock's). The browser does
+ * not know the clock's offset, so it does not work it out; `tradingDate` is
+ * only the fallback for a row from a backend that predates the field, and
+ * files by the UTC date as this screen always did.
  */
 const MT5_UTC_OFFSET_SECONDS = 3 * 60 * 60;
 
@@ -40,7 +46,7 @@ export interface MonthGrid {
   trades: number;
 }
 
-/** The ISO date a close stamp belongs to, on the trading clock. */
+/** The ISO UTC date a close stamp belongs to. Fallback only: see `rowDay`. */
 export function tradingDate(closeTs: number): string {
   const d = new Date((closeTs - MT5_UTC_OFFSET_SECONDS) * 1000);
   // UTC getters after the shift: a local-time getter would apply the viewer's
@@ -51,11 +57,16 @@ export function tradingDate(closeTs: number): string {
   return `${y}-${m}-${day}`;
 }
 
+/** The day a closed trade is filed under: the backend's, else the fallback. */
+export function rowDay(row: TradeRow): string {
+  return row.day || tradingDate(row.close_ts);
+}
+
 export function groupByDay(rows: TradeRow[]): Map<string, TradeRow[]> {
   const out = new Map<string, TradeRow[]>();
   for (const row of rows ?? []) {
     if (!row?.close_ts) continue;
-    const key = tradingDate(row.close_ts);
+    const key = rowDay(row);
     const bucket = out.get(key);
     if (bucket) bucket.push(row);
     else out.set(key, [row]);

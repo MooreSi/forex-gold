@@ -9,6 +9,9 @@ export interface TradeRow {
   exit_price: number;
   open_ts: number;
   close_ts: number;
+  /** The trading-clock date (YYYY-MM-DD) the backend files this close under:
+   *  the same day the header's goal and the Dashboard's Today count. */
+  day?: string | null;
   lots: number;
   close_lots: number[];
   pnl: number;
@@ -55,10 +58,13 @@ export interface ClosedTrades {
  * per trade on every interval, and two chances for the curve and the table
  * under it to disagree about a moving account.
  */
-export function useClosedTrades(days: number) {
+export function useClosedTrades(days: number, today = false) {
+  // `today`: only closes since midnight on the trading clock (the Dashboard's
+  // Today window). Its own key, so it never shares a 1-day window's rows.
+  const query = today ? `days=${days}&today=true` : `days=${days}`;
   return usePoll<ClosedTrades>(
-    `history/trades/${days}`,
-    useCallback(() => api.get<ClosedTrades>(`/api/history/trades?days=${days}`), [days]),
+    today ? `history/trades/${days}/today` : `history/trades/${days}`,
+    useCallback(() => api.get<ClosedTrades>(`/api/history/trades?${query}`), [query]),
     // 15s, as the NiceGUI table refreshed. It was 60s, and a trade that had
     // just closed took up to a minute to appear (owner, 2026-09-29: "really
     // slow to update"). The read is ~60ms and polls only while a tab that

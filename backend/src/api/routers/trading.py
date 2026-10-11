@@ -80,7 +80,10 @@ async def resume() -> dict:
     presses Resume, sees trading resume, and it stops again with the button
     looking broken.
     """
-    trading_ctl.resume_trading()
+    kept = trading_ctl.resume_trading()
+    if kept:
+        # A reached daily goal stands for the day (owner, 2026-10-10).
+        return {"paused": True, "until": None, "note": kept}
     return {"paused": False, "until": None}
 
 

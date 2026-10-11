@@ -142,6 +142,12 @@ def _halt_reason() -> str:
     return str(pause_status.summary().get("reason") or "")
 
 
+def _goal_keeps_its_halt() -> str | None:
+    """The daily goal's halt a Resume would leave in place, or None."""
+    from backend.src.services.risk import daily_goal
+    return daily_goal.keeps_its_halt()
+
+
 def _paired_vps_view() -> dict | None:
     """None when this node places its own orders. Otherwise the link's view
     of the VPS: whether it is up, and the badge the VPS last sent.
@@ -285,12 +291,18 @@ def badge() -> dict:
                 f"Circuit breaker active "
                 f"({breaker.get('losses_threshold')} consecutive losses)"
             )
+        only_goal = not breaker_active and halt_reason.startswith(GOAL_REASON_PREFIX)
+        # A reached daily goal is not lifted by Resume (owner, 2026-10-10), so
+        # a Resume button over it would do nothing. Its own settings lift it.
+        goal_kept = only_goal and _safe(_goal_keeps_its_halt, None) is not None
+        if goal_kept:
+            from backend.src.services.risk.manual_pause import GOAL_KEPT
+            reasons.append(GOAL_KEPT)
         return {
             "state": "halted",
-            "label": halt_label(until, not breaker_active
-                                 and halt_reason.startswith(GOAL_REASON_PREFIX)),
+            "label": halt_label(until, only_goal),
             "detail": " / ".join(r for r in reasons if r),
-            "until": until, "resume_ts": None, "can_resume": True,
+            "until": until, "resume_ts": None, "can_resume": not goal_kept,
         }
 
     target = _safe(_daily_target_state, {"reached": False})
@@ -378,6 +390,7 @@ def resume_all() -> dict:
     claiming a blanket "resumed".
     """
     cleared = []
+    kept = None
 
     try:
         if _breaker_state().get("is_active"):
@@ -390,8 +403,9 @@ def resume_all() -> dict:
     try:
         if _trade_pause_until() > time.time():
             from backend.src.services.risk import manual_pause
-            manual_pause.resume()
-            cleared.append("manual_pause")
+            kept = manual_pause.resume()
+            if not kept:
+                cleared.append("manual_pause")
     except Exception as exc:
         log.warning("[TradingStatus] could not lift the manual pause: %s", exc)
 
@@ -403,4 +417,7 @@ def resume_all() -> dict:
     except Exception as exc:
         log.warning("[TradingStatus] could not lift the daily target: %s", exc)
 
-    return {"cleared": cleared, "status": badge()}
+    out = {"cleared": cleared, "status": badge()}
+    if kept:
+        out["kept"] = kept
+    return out

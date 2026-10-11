@@ -38,6 +38,7 @@ from backend.src.services.analytics import pnl as _pnl
 from backend.src.services.analytics import ticket_maps as _maps
 from backend.src.services.broker import fees as _fees
 from backend.src.services.positions import spread_cache_repo as _spreads
+from backend.src.services.risk import clock as _clock
 from backend.src.utils.models import CONTRACT_SIZE
 
 log = logging.getLogger(__name__)
@@ -82,6 +83,12 @@ def _session(close_ts: float) -> Optional[str]:
     return _pnl.session_for_hour(hour)
 
 
+def _trading_day(close_ts: float, offset) -> Optional[str]:
+    """The ISO trading-clock date a close is filed under, or None unstamped."""
+    day = _formatting.broker_ts_to_local_date(close_ts, offset) if close_ts else None
+    return day.isoformat() if day else None
+
+
 def _direction_and_entry(open_deal: Optional[dict], close_deal: dict) -> tuple[str, float, float]:
     """(direction, entry price, opening lots).
 
@@ -118,14 +125,21 @@ def _empty(error: str) -> dict:
     return {"rows": [], "error": error, "curve": _curve.build([])}
 
 
-async def closed_trades(engine: Any, days: int) -> dict:
+async def closed_trades(engine: Any, days: int, today: bool = False) -> dict:
     """`{rows, error, curve}` — one row per closed position over `days`.
 
     `error` is a string when the broker could not be reached, and the rows are
     empty. The two are separate because "no trades in this window" and "the
     bridge is down" look identical in an empty table and call for completely
     different responses.
+
+    `today` keeps only positions closed since 00:00 on the trading clock: the
+    dashboard's Today window (owner, 2026-10-10). The last 24 hours were most
+    of yesterday. Two days of history always reach back to that midnight.
     """
+    since = _clock.day_start_ts() if today else None
+    if today:
+        days = max(days, 2)
     try:
         deals = await engine.get_deal_history(days)
     except Exception as exc:
@@ -179,6 +193,9 @@ async def closed_trades(engine: Any, days: int) -> dict:
         spreads.update(await _entry_spread.fill(engine, needs))
     fee_rate = await _fees.platform_fee_rate()
     now = time.time()
+    # The clock is asked once for the whole table, so no two rows can be
+    # filed against different offsets.
+    offset = _clock.offset_minutes()
 
     rows: list[dict] = []
     for ticket, pos_deals in by_position.items():
@@ -187,6 +204,8 @@ async def closed_trades(engine: Any, days: int) -> dict:
             # Still open. The open-positions panel owns those.
             continue
         close_deal = max(closes, key=lambda d: d.get("time", 0))
+        if since is not None and float(close_deal.get("time", 0)) - _BROKER_OFFSET < since:
+            continue
         open_deal = next((d for d in pos_deals if d.get("entry") == _ENTRY_IN), None)
 
         direction, entry, open_lots = _direction_and_entry(open_deal, close_deal)
@@ -209,6 +228,9 @@ async def closed_trades(engine: Any, days: int) -> dict:
             "exit_price": exit_price,
             "open_ts": open_ts,
             "close_ts": close_ts,
+            # The trading-clock date it is filed under: the Calendar's square,
+            # the header's Today's Goal and the goal itself all use this day.
+            "day": _trading_day(close_ts, offset),
             "lots": open_lots,
             # A partial close is several exit deals. The browser shows the
             # breakdown; it cannot reconstruct it from a single number.

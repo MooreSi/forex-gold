@@ -11,6 +11,10 @@ earlier in the broker day; profit made before a Resume is still not counted
 (resuming past a reached goal asks for a fresh goal on top). The % goal is of
 the day's real opening balance: live balance minus the WHOLE day's realised.
 
+Requirement change, owner 2026-10-10: a Resume no longer restarts the goal at
+all; it counts the whole day. The loss half below still holds (trivially); the
+profit half is reversed in `test_profit_before_a_resume_is_counted`.
+
 Nothing here reaches a broker: MT5's figures are canned per window start, the
 balance and positions come from a fake bridge, and the halt is app_config rows.
 """
@@ -106,12 +110,14 @@ def test_usd_goal_counts_the_loss_too(fresh_db, monkeypatch):
     assert not rg.is_trading_paused(), rg.halt_reason()
 
 
-def test_profit_before_a_resume_is_not_counted(fresh_db, monkeypatch):
-    """Resuming past a reached goal asks for a fresh one: unchanged."""
+def test_profit_before_a_resume_is_counted(fresh_db, monkeypatch):
+    """Requirement change, owner 2026-10-10 (was `..._is_not_counted`):
+    resuming past a reached goal no longer asks for a fresh one. +$30, Resume,
+    +$9 is a day at +$39, past a $10 goal."""
     rg.rearm_risk_guards()
     _mt5(monkeypatch, 30.0, 9.0)
     _sweep(_Bridge(1_000.0), _rs("usd", 10.0))
-    assert not rg.is_trading_paused(), rg.halt_reason()
+    assert rg.halt_reason().startswith("Daily goal secured"), rg.halt_reason()
 
 
 def test_a_fresh_goal_after_resume_is_reached_on_its_own(fresh_db, monkeypatch):

@@ -1,9 +1,9 @@
 """The daily profit goal: stop new entries once today's profit is secured.
 
 Risk > Stopping for the day > Daily goal (owner, 2026-09-29,
-docs/todo/risk/020). Once realised P&L since 00:00 UTC (the Calendar's day)
-reaches the goal, trading stops until the next Calendar day. Open trades are
-left alone; only NEW entries stop. With trades still open the goal is only
+docs/todo/risk/020). Once realised P&L since 00:00 on the trading clock (the
+Calendar's day) reaches the goal, trading stops until the next one. Open trades
+are left alone; only NEW entries stop. With trades still open the goal is only
 HELD, not secured: it becomes the day's halt when the last one closes with the
 day still at the goal, and lifts when their losses took it back under (owner,
 2026-09-30; `apply_daily_goal`, `lift_hold`).
@@ -14,10 +14,16 @@ account grows. That is what makes it compound over days and weeks, which is
 what the owner asked for. `usd` is a fixed amount.
 
 The halt is the same `trade_pause_until` + `risk_halt_reason` pair the
-daily-loss limit and the give-back guard write, so `open_trade`'s pause check,
-the Resume button and the status line need no special case. Resume restarts
-this goal's window (see `governor.rearm_risk_guards`), otherwise the day is
-already past the goal and the next check halts again.
+daily-loss limit and the give-back guard write, so `open_trade`'s pause check
+and the status line need no special case.
+
+**Once secured, it stays secured for the day (owner, 2026-10-10).** On 9
+October the goal was secured at 05:46, a Resume at 07:30 lifted it and
+restarted its count, and the day finished at -$39.28. Resume no longer lifts
+this goal's halt (`manual_pause.resume` asks `keeps_its_halt`) and the goal
+always counts the whole day, so neither a Resume nor a restart can reset it.
+The deliberate override is the goal's own setting: switched off, or raised
+above the day, and the next sweep lifts its halt (`sweep`, `lift_hold`).
 
 **Where it runs.** The other two daily halts are evaluated inside
 `record_close`, which is the frozen close path; this one is not allowed there.
@@ -27,9 +33,9 @@ halts within one sweep, and an entry that arrives inside that window can still
 open. The spec records that limit.
 
 **On MT5's figure** (owner, 2026-10-07): realised P&L is read from MT5's
-closed trades for the goal's window (`broker_realised`), the rows the header
-and the Calendar sum, not the local table, which missed the day's losing
-closes and secured a goal on a day MT5 had at -$41.05.
+closed trades for the day (`broker_realised`), the rows the header and the
+Calendar sum, not the local table, which missed the day's losing closes and
+secured a goal on a day MT5 had at -$41.05.
 
 Not to be confused with Trading > Schedule's daily target
 (`risk/schedule.py`), which is dollars only and applies only while the trading
@@ -50,61 +56,36 @@ from backend.src.services.risk import settings as _risk
 log = logging.getLogger(__name__)
 
 __all__ = ["sweep", "SweepState", "progress", "header_progress", "goal_standing",
-           "broker_realised"]
+           "broker_realised", "keeps_its_halt"]
 
 # How often the monitor cycle may evaluate the goal. The cycle itself runs
 # every 1-5s; the goal reads the day's closes and, in % mode, the account
 # balance from the bridge, neither of which needs doing every second.
 SWEEP_EVERY_S = 5.0
 
-# Written by `governor.rearm_risk_guards` on a manual Resume.
-BASELINE_KEY = "daily_goal_baseline_ts"
-
 
 def _goal_day_start() -> float:
-    """00:00 UTC today: the Calendar's day, not the broker day (22:00 BST).
+    """00:00 today on the trading clock: the Calendar's day, not the broker
+    day (22:00 BST).
 
-    The header and the Calendar file a close by its UTC date, and a goal
+    The header and the Calendar file a close by the same day, and a goal
     judged on another day secured "+$26.15" while the header read "+$18.51"
     (owner, 2026-10-08). The daily-loss limit uses the same day.
     """
     return _gov.calendar_day_start_ts()
 
 
-def _window_start() -> float:
-    """The goal's day start, or the last manual Resume if that is later."""
-    day_start = _goal_day_start()
-    try:
-        baseline = float(db_module.get_app_config(BASELINE_KEY) or 0)
-    except (TypeError, ValueError):
-        baseline = 0.0
-    return max(day_start, baseline)
-
-
-def goal_figure(day_realised: float, window_realised: float) -> float:
-    """What the goal counts: realised since its window opened, plus any LOSS
-    made earlier in the broker day.
-
-    A Resume restarts the count of profit (resuming past a reached goal asks
-    for a fresh one) but never wipes out a loss: -$41.05, Resume, +$36.30 is a
-    day at -$4.75, not +$36.30 (owner, 2026-10-07: "it still needs to cover
-    the loss and achieve $26.99").
-    """
-    return round(window_realised + min(day_realised - window_realised, 0.0), 2)
-
-
 def _local_realised() -> tuple[float, float]:
-    """(goal figure, whole day) from the local table."""
-    window, _peak = _gov.day_pnl_and_peak(_window_start())
+    """(goal figure, whole day) from the local table: both the whole day."""
     day, _peak = _gov.day_pnl_and_peak(_goal_day_start())
-    return goal_figure(day, window), day
+    return day, day
 
 
 def _goal_usd(rs: dict, realised: float, balance: Optional[float]) -> Optional[float]:
     """The goal in dollars, or None when it cannot be judged or is off.
 
-    `realised` is the WHOLE broker day's: a % goal is of the day's opening
-    balance, which a Resume does not change."""
+    `realised` is the WHOLE day's: a % goal is of the day's opening
+    balance."""
     if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
         return None
     value = float(rs.get("daily_goal_value", 0) or 0)
@@ -153,7 +134,7 @@ def progress(rs: dict, balance: Optional[float],
     (MT5, the same one the Calendar shows); without it the local table is used.
     """
     if realised is None:
-        realised, _peak = _gov.day_pnl_and_peak(_window_start())
+        realised, _peak = _gov.day_pnl_and_peak(_goal_day_start())
     goal = _goal_usd(rs, realised, balance)
     if goal is None:
         return None
@@ -222,7 +203,7 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
         return False
     if open_positions == 0:
         _write_halt(reason)
-        log.warning("[RG] %s — new entries stopped until the day ends (00:00 UTC)", reason)
+        log.warning("[RG] %s — new entries stopped until the day ends (midnight, trading clock)", reason)
         return True
     waiting = ("open trades" if open_positions is None
                else f"{open_positions} open trade{'s' if open_positions != 1 else ''}")
@@ -276,6 +257,12 @@ def lift_hold(rs: dict, balance: Optional[float],
         return False
     if check_daily_goal(rs, balance, realised, day_realised):
         return False
+    _release(rs, balance, "open trades closed under the daily goal")
+    return True
+
+
+def _release(rs: dict, balance: float, why: str) -> None:
+    """Clear this goal's halt, re-running the guards it was masking."""
     with db_module.db():
         db_module.set_app_config("trade_pause_until", "0")
         db_module.set_app_config("risk_halt_reason", "")
@@ -286,12 +273,45 @@ def lift_hold(rs: dict, balance: Optional[float],
     if _gov.is_trading_paused():
         log.warning("[RG] daily goal hold replaced: %s", _gov.halt_reason())
     else:
-        log.warning("[RG] open trades closed under the daily goal — trading resumes")
+        log.warning("[RG] %s — trading resumes", why)
+
+
+def release_when_off(rs: dict, balance: Optional[float]) -> bool:
+    """The goal was switched off: lift its own halt. True if lifted.
+
+    The deliberate override now that Resume leaves a secured goal alone
+    (owner, 2026-10-10). Needs the balance for the same reason `lift_hold`
+    does; never touches another guard's halt.
+    """
+    if balance is None or not _own_halt():
+        return False
+    _release(rs, balance, "daily goal switched off")
     return True
+
+
+def keeps_its_halt() -> Optional[str]:
+    """The halt reason a Resume must leave in place, or None.
+
+    This goal's own halt, held or secured, while the goal is switched on. A
+    Resume that lifted it restarted nothing the next sweep could not undo, and
+    on 9 October it let a secured day trade on to -$39.28 (owner, 2026-10-10).
+    """
+    if not _own_halt():
+        return None
+    try:
+        enabled = bool(int(_risk.get().get("daily_goal_enabled", 0) or 0))
+    except Exception:
+        # Its own halt, and the setting cannot be read: keep it. Leaving a
+        # halt in place is the direction that cannot cost money.
+        enabled = True
+    return _gov.halt_reason() if enabled else None
 
 
 async def broker_realised(bridge: Any) -> tuple[bool, Optional[float], Optional[float]]:
     """(the bridge reports deals, MT5's goal figure, MT5's whole-day figure).
+
+    The two figures are the same since 2026-10-10: the goal counts the whole
+    day. Both are kept so the callers' shape did not have to change.
 
     The goal is profit above the day's starting capital, and MT5 is the record
     of that (the header's "Today's Goal" reads the same rows). A bridge with no
@@ -300,15 +320,10 @@ async def broker_realised(bridge: Any) -> tuple[bool, Optional[float], Optional[
     """
     if getattr(bridge, "get_deal_history", None) is None:
         return False, None, None
-    window = await db_module.to_db_thread(_window_start)
-    in_window = await _todays.since(bridge, window)
-    if in_window is None:
-        return True, None, None
-    day_start = _goal_day_start()
-    day = in_window if window <= day_start else await _todays.since(bridge, day_start)
+    day = await _todays.since(bridge, _goal_day_start())
     if day is None:
         return True, None, None
-    return True, goal_figure(day, in_window), day
+    return True, day, day
 
 
 async def _open_positions(bridge: Any) -> Optional[int]:
@@ -337,6 +352,10 @@ async def sweep(state: SweepState, bridge: Any, rs: dict,
     state.last_check = now
     try:
         if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
+            if await db_module.to_db_thread(_own_halt):
+                acc = await bridge.get_account()
+                balance = float((acc or {}).get("balance") or 0) or None
+                await db_module.to_db_thread(release_when_off, rs, balance)
             return
         has_deals, realised, day_realised = await broker_realised(bridge)
         if has_deals and realised is None:

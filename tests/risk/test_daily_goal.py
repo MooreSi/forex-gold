@@ -112,14 +112,14 @@ def test_yesterdays_profit_does_not_count(fresh_db):
     assert dg.check_daily_goal(_rs("usd", 100.0), balance=None) is None
 
 
-def test_a_resume_restarts_the_window(fresh_db):
-    """Otherwise Resume is undone on the very next check: the day is already
-    past the goal. After a resume, only profit made since counts."""
+def test_a_resume_does_not_restart_the_count(fresh_db):
+    """Requirement change, owner 2026-10-10 (was `test_a_resume_restarts_the_
+    window`): a goal secured at 05:46 on 9 October was resumed past at 07:30
+    and the day traded on to -$39.28. The goal counts the whole day, Resume
+    or not; `test_daily_goal_survives_resume.py` has the rest."""
     _closes([150])
     assert dg.check_daily_goal(_rs("usd", 100.0), balance=None) is not None
     rg.rearm_risk_guards()
-    assert dg.check_daily_goal(_rs("usd", 100.0), balance=None) is None
-    _closes([120], at=time.time() + 5)
     assert dg.check_daily_goal(_rs("usd", 100.0), balance=None) is not None
 
 
@@ -424,10 +424,14 @@ def test_a_hold_never_lifts_another_guards_halt(fresh_db):
     assert rg.halt_reason().startswith("Give-back")
 
 
-def test_a_manual_resume_during_the_hold_is_respected(fresh_db):
+def test_a_manual_resume_during_the_hold_leaves_it(fresh_db):
+    """Requirement change, owner 2026-10-10 (was `..._is_respected`): Resume
+    does not lift the goal's hold while the goal is switched on."""
     from backend.src.services.risk import manual_pause
+    db.update_risk_settings(_rs("usd", 100.0))
     _closes([150])
     _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0))
     manual_pause.resume()
     _sweep(_PosBridge(10_150.0, 1), _rs("usd", 100.0), now=2_000.0)
-    assert not rg.is_trading_paused(), "the window restarted at the Resume"
+    assert rg.is_trading_paused()
+    assert rg.halt_reason().startswith("Daily goal reached")

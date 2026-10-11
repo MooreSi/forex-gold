@@ -1042,9 +1042,9 @@ class TradingRuntime:
         """Update signal fields and propagate changes to any linked open trade."""
         return await _update_signal_impl(self._bridge, signal_id, updates)
 
-    async def compute_mt5_performance(self, days: int = 90) -> dict:
+    async def compute_mt5_performance(self, days: int = 90, since_ts=None) -> dict:
         """Compute performance stats directly from MT5 bridge deal history."""
-        return await _compute_mt5_performance_impl(self._bridge, days)
+        return await _compute_mt5_performance_impl(self._bridge, days, since_ts)
 
     async def get_total_deposits(self) -> float:
         return await _get_total_deposits_impl(self._bridge)

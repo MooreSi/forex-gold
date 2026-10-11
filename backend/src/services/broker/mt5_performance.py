@@ -87,8 +87,14 @@ def _apply_fee(pos_deals: list, open_lots: float, comm_rate: float) -> tuple[flo
     return round(raw_pnl - est_fee, 2), est_fee
 
 
-async def compute_mt5_performance(bridge: Any, days: int = 90) -> dict:
-    """Compute performance stats directly from MT5 bridge deal history."""
+async def compute_mt5_performance(bridge: Any, days: int = 90,
+                                  since_ts: float | None = None) -> dict:
+    """Compute performance stats directly from MT5 bridge deal history.
+
+    `since_ts` (a true epoch) keeps only positions closed at or after it: the
+    dashboard's Today window, from 00:00 on the trading clock (owner,
+    2026-10-10). None is the whole `days` window, as before.
+    """
     try:
         account = await bridge.get_account()
         deals   = await bridge.get_deal_history(days) or []
@@ -114,6 +120,8 @@ async def compute_mt5_performance(bridge: Any, days: int = 90) -> dict:
             if not close_deal:
                 continue
             close_ts = float(close_deal.get("time", 0))
+            if since_ts is not None and close_ts - BROKER_OFFSET < since_ts:
+                continue
             _open_deal = next((d for d in pos_deals if d.get("entry") == 0), None)
             _open_lots = float(_open_deal.get("volume", 0)) if _open_deal else float(close_deal.get("volume", 0))
             # Net of estimated fees (same _apply_fee logic as the Closed Trades

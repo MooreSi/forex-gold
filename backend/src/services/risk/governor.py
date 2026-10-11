@@ -409,15 +409,17 @@ def rg_day_start_ts() -> float:
 
 
 def calendar_day_start_ts() -> float:
-    """00:00 UTC today: the day the header and the Calendar file closes by.
+    """00:00 today on the trading clock: the day the header and the Calendar
+    file closes by.
 
     The daily goal and the daily-loss limit count from here, not from the
     broker rollover (owner, 2026-10-08), so the halts agree with the figures
-    on screen. Today's UTC date, not the trading clock's: ahead of UTC, the
-    clock's date starts a day that has not begun.
+    on screen. It was 00:00 UTC (01:00 BST) until 2026-10-10, when the owner
+    moved every day in the app onto the trading clock. `clock.day_start_ts`
+    is the definition; this is the name the guards already used.
     """
-    d = datetime.now(timezone.utc).date()
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp()
+    from backend.src.services.risk import clock as _clock
+    return _clock.day_start_ts()
 
 
 def day_pnl_and_peak(day_start: Optional[float] = None) -> tuple[float, float]:
@@ -469,7 +471,8 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
     #
     # Only a LOSS before the resume is forgiven; a profit still cushions the
     # day. +$37.87, Resume, -$63.84 is a day at -$25.97, not -$63.84 (owner,
-    # 2026-10-08). The mirror of `daily_goal.goal_figure`.
+    # 2026-10-08). The daily goal no longer has a window to mirror: it counts
+    # the whole day (2026-10-10).
     window, _peak = day_pnl_and_peak(_daily_loss_window_start())
     day, _peak = day_pnl_and_peak(calendar_day_start_ts())
     realised = window + max(day - window, 0.0)
@@ -500,7 +503,7 @@ def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:
     with db_module.db():
         db_module.set_app_config("trade_pause_until", str(until))
         db_module.set_app_config("risk_halt_reason", reason)
-    log.warning("[RG] %s — trading stopped until the day ends (00:00 UTC)", reason)
+    log.warning("[RG] %s — trading stopped until the day ends (midnight, trading clock)", reason)
 
 
 def _daily_loss_window_start() -> float:
@@ -532,10 +535,10 @@ def rearm_risk_guards() -> None:
     with db_module.db():
         rearm_giveback_guard()
         db_module.set_app_config("daily_loss_baseline_ts", str(time.time()))
-        # The daily goal too (risk/daily_goal.BASELINE_KEY; spelled out here
-        # because that module imports this one). Without it, a Resume after
-        # the goal is re-halted on the next sweep: the day is already past it.
-        db_module.set_app_config("daily_goal_baseline_ts", str(time.time()))
+        # NOT the daily goal. It restarted from here until 2026-10-10, which
+        # is how a Resume at 07:30 on 9 October dropped a goal secured at 05:46
+        # and the day traded on to -$39.28. A secured goal now stands for the
+        # whole day (risk/daily_goal.keeps_its_halt).
 
 
 def rearm_giveback_guard() -> None:

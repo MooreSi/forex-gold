@@ -3,7 +3,9 @@
  *
  * Asked for on 2026-10-09: 1 day, 1 week, 30 days or all time, chosen on the
  * Trading performance card, moving the Equity curve card with it, and still
- * chosen after a reload.
+ * chosen after a reload. On 2026-10-10 "1 day" became Today: from midnight on
+ * the trading clock, not the last 24 hours (a Saturday read -$44.22 of
+ * Friday's trading).
  *
  * What is pinned is what the cards ASK FOR, not only what they say: a label
  * that reads "last 7 days" over a 30-day request is the failure this exists
@@ -53,6 +55,14 @@ function daysAskedOf(prefix: string): number[] {
     .map((u) => Number(new URL(u, "http://x").searchParams.get("days")));
 }
 
+/** Whether each GET to `prefix` asked for today on the trading clock. */
+function todayAskedOf(prefix: string): boolean[] {
+  return fetchMock.mock.calls
+    .map((c) => String(c[0]))
+    .filter((u) => u.startsWith(prefix))
+    .map((u) => new URL(u, "http://x").searchParams.get("today") === "true");
+}
+
 /** This repository's jsdom provides no `localStorage` at all. */
 function fakeStorage(): Storage {
   const held = new Map<string, string>();
@@ -92,10 +102,10 @@ describe("the Dashboard's performance window", () => {
     expect(windowButton("30 days")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("offers exactly 1 day, 1 week, 30 days and all time", async () => {
+  it("offers exactly Today, 1 week, 30 days and all time", async () => {
     render(<DashboardPanel />);
 
-    for (const name of ["1 day", "1 week", "30 days", "All time"]) {
+    for (const name of ["Today", "1 week", "30 days", "All time"]) {
       expect(windowButton(name)).toBeInTheDocument();
     }
   });
@@ -116,9 +126,9 @@ describe("the Dashboard's performance window", () => {
     render(<DashboardPanel />);
     await screen.findByText("last 30 days");
 
-    act(() => { windowButton("1 day").click(); });
+    act(() => { windowButton("Today").click(); });
 
-    expect(await screen.findByText("last 24 hours")).toBeInTheDocument();
+    expect(await screen.findByText("today")).toBeInTheDocument();
     expect(screen.queryByText("last 30 days")).toBeNull();
   });
 
@@ -170,8 +180,19 @@ describe("the Dashboard's performance window", () => {
     render(<DashboardPanel />);
     expect(windowButton("30 days")).toHaveAttribute("aria-pressed", "true");
 
-    act(() => { windowButton("1 day").click(); });
+    act(() => { windowButton("Today").click(); });
 
     await waitFor(() => expect(daysAskedOf("/api/history/trades")).toContain(1));
+  });
+
+  it("asks both cards for today on the trading clock, not the last 24 hours", async () => {
+    render(<DashboardPanel />);
+    await waitFor(() => expect(daysAskedOf("/api/history/trades")).toContain(30));
+    expect(todayAskedOf("/api/history/trades")).not.toContain(true);
+
+    act(() => { windowButton("Today").click(); });
+
+    await waitFor(() => expect(todayAskedOf("/api/history/trades")).toContain(true));
+    expect(todayAskedOf("/api/history/state")).toContain(true);
   });
 });

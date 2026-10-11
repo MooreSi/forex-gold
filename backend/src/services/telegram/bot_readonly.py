@@ -292,7 +292,9 @@ async def cmd_resume(args: list) -> str:
     # a second copy produces: without the re-arm, resuming after a give-back
     # halt is undone by the very next close.
     from backend.src.services.risk import manual_pause as _pause
-    _pause.resume()
+    kept = _pause.resume()
+    if kept:
+        return kept
     rs        = db_module.get_risk_settings()
     auto_exec = bool(rs.get("auto_execute_signals", 0))
     return (

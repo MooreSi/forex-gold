@@ -21,7 +21,7 @@ from backend.src.utils.trading_clock import (
 )
 
 __all__ = ["offset_minutes", "effective_offset_minutes", "set_offset_minutes",
-           "describe", "now", "from_timestamp", "to_timestamp"]
+           "describe", "now", "from_timestamp", "to_timestamp", "day_start_ts"]
 
 
 def _rs() -> dict:
@@ -52,6 +52,20 @@ def from_timestamp(epoch: float) -> datetime:
 def to_timestamp(wall: datetime) -> float:
     """The epoch second for a naive trading-clock time."""
     return local_timestamp(wall, offset_minutes())
+
+
+def day_start_ts() -> float:
+    """00:00 today on the trading clock, as an epoch second.
+
+    THE start of "today" for every money figure that has one: the daily goal,
+    the daily-loss limit, the header's Today's Goal, the Calendar's squares and
+    the dashboard's Today window (owner, 2026-10-10: "aligned to the trading
+    clock so I can see the actual performance by my day"). The offset is read
+    once, so the wall clock and its conversion back cannot disagree.
+    """
+    offset = offset_minutes()
+    midnight = local_now(offset).replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_timestamp(midnight, offset)
 
 
 def effective_offset_minutes() -> int:

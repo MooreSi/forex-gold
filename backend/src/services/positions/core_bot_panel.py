@@ -394,7 +394,9 @@ def _resume_trading() -> Screen:
     # in services/risk/manual_pause.py -- written out by hand in three places
     # until 2026-09-18 and correct in only two of them.
     from backend.src.services.risk import manual_pause as _pause
-    _pause.resume()
+    kept = _pause.resume()
+    if kept:
+        return Screen(kept, mode="send")
     log.info("[Panel] trading resumed from the pause panel")
     return Screen("▶️ Trading resumed.", mode="send")
 

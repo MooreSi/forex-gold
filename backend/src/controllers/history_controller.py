@@ -20,6 +20,7 @@ from backend.src.services.analytics import labels as _labels
 from backend.src.services.analytics import lifetime_pnl as _lifetime_pnl
 from backend.src.services.analytics import pnl as _pnl
 from backend.src.services.analytics import ticket_maps as _maps
+from backend.src.services.analytics import todays_realised as _todays
 from backend.src.services.analytics import trade_table as _trade_table
 from backend.src.services.broker import fees as _fees
 from backend.src.services.channels import performance as _channels
@@ -34,7 +35,7 @@ __all__ = [
     "parse_reason", "format_broker_ts", "format_duration", "to_date",
     "broker_ts_to_local_date", "strategy_display_label",
     "trade_source_label", "trade_channel_label", "ticket_info",
-    "closed_trade_table", "account_lifetime_pnl",
+    "closed_trade_table", "window_performance", "account_lifetime_pnl",
     "get_cached_spreads", "cache_spread", "platform_fee_rate", "apply_fee",
     "get_hourly_pnl_grid", "session_for_hour", "get_app_config",
     "set_app_config", "recompute_channel_performance",
@@ -95,9 +96,14 @@ async def ticket_info() -> dict:
     return await _maps.ticket_info()
 
 
-async def closed_trade_table(engine, days: int) -> dict:
+async def closed_trade_table(engine, days: int, today: bool = False) -> dict:
     """`{rows, error}` for the Analysis tab's deal-level trade table."""
-    return await _trade_table.closed_trades(engine, days)
+    return await _trade_table.closed_trades(engine, days, today)
+
+
+async def window_performance(engine, days: int, today: bool = False) -> dict:
+    """The performance figures for a window, or for today on the trading clock."""
+    return await _todays.performance(engine, days, today)
 
 
 async def account_lifetime_pnl(engine, equity: float):

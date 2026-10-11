@@ -36,6 +36,9 @@ router = APIRouter(prefix="/api/history", tags=["history"])
 # the number of channels and the 7x24 grid rather than by how long the account
 # has been running.
 DAYS = Query(30, ge=1, le=3650)
+# Today on the trading clock rather than the last `days` (owner, 2026-10-10:
+# the dashboard's 1D read the 24 hours before now, mostly yesterday).
+TODAY = Query(False)
 
 
 class ChannelPause(BaseModel):
@@ -71,11 +74,13 @@ def _grid_rows(grid: dict) -> list[dict]:
 
 
 @router.get("/state")
-async def state(days: int = DAYS, eng: Any = Depends(engine_dep)) -> dict:
+async def state(days: int = DAYS, today: bool = TODAY,
+                eng: Any = Depends(engine_dep)) -> dict:
     """Everything the Analysis tab renders, for one window."""
-    performance = await eng.compute_mt5_performance(days)
+    performance = await history_ctl.window_performance(eng, days, today)
     return {
         "days": days,
+        "today": today,
         # {} when the bridge could not answer. The panel says "no broker data"
         # rather than rendering a zero that reads as a flat month.
         "performance": performance or {},
@@ -86,7 +91,8 @@ async def state(days: int = DAYS, eng: Any = Depends(engine_dep)) -> dict:
 
 
 @router.get("/trades")
-async def closed_trades(days: int = DAYS, eng: Any = Depends(engine_dep)) -> dict:
+async def closed_trades(days: int = DAYS, today: bool = TODAY,
+                        eng: Any = Depends(engine_dep)) -> dict:
     """Every closed trade in the window, deal by deal.
 
     Its own endpoint rather than a field on `/state`: `/state` returns
@@ -98,7 +104,7 @@ async def closed_trades(days: int = DAYS, eng: Any = Depends(engine_dep)) -> dic
     `error` is separate from an empty list because "no trades in this window"
     and "the bridge is down" look identical in an empty table.
     """
-    return await history_ctl.closed_trade_table(eng, days)
+    return await history_ctl.closed_trade_table(eng, days, today)
 
 
 @router.get("/today")

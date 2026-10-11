@@ -127,6 +127,23 @@ export function TradingStatusDialog({
     );
   }
 
+  // Halted with nothing a Resume would lift: a reached daily goal (owner,
+  // 2026-10-10). The detail says what does lift it. A Pause form here would
+  // write a shorter pause over the goal's.
+  if (status.state === "halted" && !status.can_resume) {
+    return (
+      <DialogShell open={open} onOpenChange={onOpenChange} title="Trading paused">
+        <div data-testid="trading-status-dialog" className="space-y-3 text-xs text-ink-2">
+          <p className="font-semibold text-ink-1">{status.label}</p>
+          {status.detail && <p>{status.detail}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
+          </div>
+        </div>
+      </DialogShell>
+    );
+  }
+
   return (
     <DialogShell
       open={open}

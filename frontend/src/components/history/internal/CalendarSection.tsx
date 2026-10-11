@@ -6,7 +6,7 @@ import { formatMoney, pnlColour } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 import { useClosedTrades } from "../hooks/useClosedTrades";
 import { DayDetailDialog } from "./DayDetailDialog";
-import { monthGrid, tradingDate, type DayCell } from "./calendarGrid";
+import { monthGrid, rowDay, type DayCell } from "./calendarGrid";
 
 /**
  * A month of closed trades, day by day.
@@ -68,7 +68,7 @@ export function CalendarSection({ days }: { days: number }) {
   // Opens on the month of the newest close rather than on the machine's
   // month: with a 7-day window in early January, "this month" can be empty
   // while every trade in the window sits in December.
-  const newest = rows.length ? tradingDate(rows[0]!.close_ts) : today;
+  const newest = rows.length ? rowDay(rows[0]!) : today;
   const shown = cursor ?? (newest
     ? { year: Number(newest.slice(0, 4)), month: Number(newest.slice(5, 7)) }
     : null);

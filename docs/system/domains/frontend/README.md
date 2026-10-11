@@ -103,7 +103,7 @@ number. Its tick comes from `/api/system/header`, which already carries one,
 rather than from `/api/chart/tick`.
 
 **The performance window is chosen on the Trading performance card
-(2026-10-09).** 1 day, 1 week, 30 days or all time; the Equity curve card
+(2026-10-09).** Today, 1 week, 30 days or all time; the Equity curve card
 follows it and only names it. View-only, so it does not break the "controls
 nothing" rule. Remembered per browser under the `dashboard-window`
 localStorage key (`dashboard/hooks/useDashboardWindow.ts`); a stored value it
@@ -111,7 +111,13 @@ does not offer falls back to 30. **All time is `days=3650`**, the
 `/api/history/*` ceiling (`le=3650`): anything larger is a 422 that the cards
 would show as "no broker data". 7 and 30 are the Analysis tab's own key
 shapes, so a window both tabs show is still one request. Pinned by
-`DashboardWindow.test.tsx`.
+`DashboardWindow.test.tsx`. **Today is from midnight on the trading clock**
+(owner, 2026-10-10), sent as `days=1&today=true`: the backend reads two days
+of deals and keeps closes since `clock.day_start_ts()`. It was "1 day", the
+last 24 hours, which on a Saturday read -$44.22 of Friday. **The Calendar
+files a close by the backend's `row.day`** (the trading-clock date), because
+the browser does not know the clock's offset; `tradingDate` (UTC) is only the
+fallback for a row without one.
 
 **Nothing on it bills a model.** The AI figures are read back from what the AI
 Analysis tab last produced. A screen that bills by being looked at is a screen

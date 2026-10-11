@@ -87,13 +87,14 @@ def test_just_short_on_mt5_is_not_reached(fresh_db, monkeypatch):
     assert not rg.is_trading_paused()
 
 
-def test_mt5_is_asked_from_the_goals_own_window(fresh_db, monkeypatch):
-    """A Resume restarts the window; MT5's figure must restart with it."""
+def test_mt5_is_asked_from_the_day_even_after_a_resume(fresh_db, monkeypatch):
+    """Requirement change, owner 2026-10-10 (was `..._from_the_goals_own_
+    window`): a Resume no longer restarts the goal, so MT5 is asked for the
+    whole day."""
     calls = _mt5_says(monkeypatch, 0.0)
     rg.rearm_risk_guards()
     _sweep(_MT5Bridge(1_000.0), _rs("usd", 10.0))
-    assert calls and calls[0] == dg._window_start()
-    assert calls[0] > rg.rg_day_start_ts()
+    assert calls and set(calls) == {dg._goal_day_start()}
 
 
 def test_no_answer_from_mt5_decides_nothing(fresh_db, monkeypatch):

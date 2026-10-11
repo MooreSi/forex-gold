@@ -70,12 +70,14 @@ export function useDashboardController() {
   const chart = useChartController();
   const range = useDashboardWindow();
   const days = range.current.days;
-  const closed = useClosedTrades(days);
+  const today = range.current.today;
+  const closed = useClosedTrades(days, today);
+  const query = today ? `days=${days}&today=true` : `days=${days}`;
 
   const history = usePoll<HistoryState>(
-    `history/state?days=${days}`,
+    `history/state?${query}`,
     useCallback(
-      () => api.get<HistoryState>(`/api/history/state?days=${days}`), [days]),
+      () => api.get<HistoryState>(`/api/history/state?${query}`), [query]),
     15_000,
   );
 

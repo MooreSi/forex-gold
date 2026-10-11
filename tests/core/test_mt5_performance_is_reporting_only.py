@@ -82,8 +82,11 @@ class TestItIsOnlyEverUsedForReporting:
             # decides nothing. It is also the ONLY broker call that tab makes —
             # see tests/api/routers/test_history.py, which pins that a full
             # render costs one round-trip rather than the 4.3-a-minute the
-            # NiceGUI page cost (bugs/030).
-            "backend/src/api/routers/history.py",
+            # NiceGUI page cost (bugs/030). Moved out of the router into
+            # `todays_realised.performance` on 2026-10-10, when the dashboard's
+            # Today window needed "since local midnight": same read, same
+            # screens, still reporting.
+            "backend/src/services/analytics/todays_realised.py",
             # The AI Analysis tab's market research (2026-09-20). Reporting,
             # and the same caller the NiceGUI AI Summary page in this list's
             # history was: the figures go into the prompt the model reads.

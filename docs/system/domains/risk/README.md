@@ -441,6 +441,42 @@ only, every source.
   daily-loss branch (only with `risk_governor_enabled`, off on this account)
   still use the broker day. Tests' `_closes` default clamps to the later of
   the two day starts. Pinned by `tests/risk/test_daily_loss_calendar_day.py`.
+- **Every day is the trading clock's day, and a secured goal stands for it
+  (2026-10-10, owner).** On 9 October the goal was secured at 05:46
+  (+$29.57 vs $22.11); at 07:30 a Resume lifted it and restarted its window,
+  the morning stopped counting, and the day finished at -$39.28 on MT5. The
+  same morning the dashboard's 1D read -$44.22: the last 24 hours, mostly
+  Friday, on a Saturday with nothing traded. Owner's choices: 00:00 on the
+  Trading Clock for every "day", and Resume must not undo a reached goal.
+  Now:
+  - `clock.day_start_ts()` is THE start of today (local midnight on the
+    trading clock, offset read once). `governor.calendar_day_start_ts()`
+    returns it, so the goal, the daily-loss limit and both halts' end move
+    with it. **This supersedes the two 00:00 UTC bullets above.** The halts
+    still end at start + 86400s, so on a clock-change day (25 Oct) they end
+    an hour off midnight; the next sweep re-halts a goal still standing.
+  - The goal counts the WHOLE day. `rearm_risk_guards` no longer writes
+    `daily_goal_baseline_ts` (a stale row may remain; nothing reads it), and
+    `goal_figure` / `_window_start` are gone. The daily-loss and give-back
+    baselines are unchanged.
+  - `manual_pause.resume()` leaves the goal's own halt (held or secured) in
+    place while the goal is switched on and returns `GOAL_KEPT`, the sentence
+    the dashboard, `/resume`, the bot panel and `/api/trading/resume` show.
+    If the setting cannot be read while it is the goal's halt, the halt
+    stays. The badge reports `can_resume: false` with that sentence, and the
+    dialog shows only the reason and Close (a Pause form would write a
+    shorter pause over the goal's).
+  - The override is the goal's own setting: switched off, the next sweep
+    lifts its halt (`release_when_off`, needs the balance, re-runs the guards
+    the halt masked, never another guard's halt); raised above the day,
+    `lift_hold` lifts it when flat, as before.
+  - The header's Today's Goal (`todays_realised.realised_on`) and every
+    closed-trade row's new `day` field file a close by
+    `formatting.broker_ts_to_local_date`; the Calendar files by `row.day`.
+  Pinned by `tests/risk/test_trading_clock_day.py` and
+  `tests/risk/test_daily_goal_survives_resume.py`. Six older test files were
+  moved to the new rules (requirement change); each says so where it changed.
+  **Not yet run on a demo account.**
 - **There are now two daily profit targets.** Trading > Schedule's
   `trading_schedule_daily_target` is dollars only, applies only while the
   trading schedule is on, and refuses at the entry gate rather than pausing.

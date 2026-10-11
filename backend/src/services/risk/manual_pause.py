@@ -32,7 +32,7 @@ from backend.src.services.risk import governor as _governor
 
 log = logging.getLogger(__name__)
 
-__all__ = ["pause", "pause_until", "resume", "state", "PAUSE_KEY"]
+__all__ = ["pause", "pause_until", "resume", "state", "PAUSE_KEY", "GOAL_KEPT"]
 
 PAUSE_KEY = "trade_pause_until"
 
@@ -76,8 +76,14 @@ def pause(hours: float | None = None, until: float | None = None) -> float:
     return _pause_for(4.0 if hours is None else hours)
 
 
-def resume() -> None:
+def resume() -> str | None:
     """Lift the pause, and re-arm the guards that would otherwise undo it.
+
+    Returns None when lifted. A secured (or held) daily goal is the one halt
+    this does NOT lift while the goal is switched on: it returns `GOAL_KEPT`,
+    the sentence every Resume surface shows, and changes nothing (owner, 2026-10-10: on
+    9 October a Resume undid a goal secured at 05:46 and the day traded on to
+    -$39.28). Switching the goal off, or raising it, is how to trade on.
 
     The re-arm is not optional. See the module docstring: without it, resuming
     after a give-back halt lasts until the next close.
@@ -88,6 +94,11 @@ def resume() -> None:
     halted with no explanation. The guard is still armed either way — it has
     simply not had its window reset.
     """
+    from backend.src.services.risk import daily_goal as _goal
+    kept = _goal.keeps_its_halt()
+    if kept:
+        log.warning("[pause] Resume left the daily goal's halt in place: %s", kept)
+        return GOAL_KEPT
     db_module.set_app_config(PAUSE_KEY, "0")
     try:
         _governor.rearm_risk_guards()
@@ -95,6 +106,13 @@ def resume() -> None:
         log.warning("[pause] resumed, but the post-close guards could not be "
                     "re-armed (%s) — a give-back halt may re-trip on the next "
                     "close", exc)
+    return None
+
+
+# What every Resume surface says when the goal's halt stays.
+GOAL_KEPT = ("Today's daily goal is reached, so trading stays paused until "
+             "midnight. To trade on today, raise the goal or switch it off in "
+             "Risk settings.")
 
 
 def state() -> dict:

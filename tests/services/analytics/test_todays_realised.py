@@ -29,12 +29,15 @@ def test_sums_only_todays_rows():
 
 
 def test_a_close_before_the_days_first_second_belongs_to_the_day_before():
-    """Filed as the Calendar files it: stamp minus UTC+3, read as a UTC date."""
+    """Filed as the Calendar files it: stamp minus UTC+3, read on the trading
+    clock. Requirement change, owner 2026-10-10: it was read as a UTC date;
+    the clock is pinned to UTC+0 here so the boundary is still 00:00 UTC
+    (`test_trading_clock_day.py` has the BST case)."""
     _base()
     utc_midnight_on_the_day = NOON - 3 * 3600 - 12 * 3600
     stamp = utc_midnight_on_the_day + 3 * 3600 - 1800  # 23:30 the day before
     table = {"error": None, "rows": [{"close_ts": stamp, "pnl": 9.0}]}
-    assert tr.realised_on(table, DAY) == 0.0
+    assert tr.realised_on(table, DAY, offset_minutes=0) == 0.0
 
 
 def test_none_when_mt5_could_not_answer():

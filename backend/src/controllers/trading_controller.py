@@ -177,11 +177,12 @@ def pause_trading(*args, **kwargs) -> float:
     return _pause.pause(*args, **kwargs)
 
 
-def resume_trading() -> None:
+def resume_trading() -> str | None:
     """Lift a manual pause AND re-arm the post-close guards. See
-    services/risk/manual_pause.py for why the second half is not optional."""
+    services/risk/manual_pause.py for why the second half is not optional.
+    Returns why trading stays paused (a reached daily goal), or None."""
     from backend.src.services.risk import manual_pause as _pause
-    _pause.resume()
+    return _pause.resume()
 
 
 def trading_pause_status() -> dict:

@@ -5,15 +5,19 @@ today vs a goal of $23.80" while the header read "$24.10 / $18.51". Both were
 MT5's closes. The halt counted from the broker day (22:00 BST), the header and
 the Calendar file a close by its UTC date (01:00 BST), and +$7.64 closed at
 23:05 and 23:07 BST was in one and not the other. Owner's choice: the
-Calendar's day. So the goal counts from 00:00 UTC today,
+Calendar's day. So the goal counts from the start of the Calendar's day,
 and the halt it writes lasts until that day ends, not until the broker's
 rollover (or it would lift at 22:00 and re-halt straight away).
+
+Requirement change, owner 2026-10-10: the Calendar's day (and so the goal's)
+is now the trading clock's, 00:00 local, not 00:00 UTC. `_calendar_day_start`
+moved with it; `test_trading_clock_day.py` pins the offsets.
 
 Nothing here reaches a broker: MT5's figures are canned, the balance comes from
 a fake bridge, and the halt is app_config rows.
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 
@@ -30,8 +34,10 @@ def _rs(mode="usd", value=100.0):
 
 
 def _calendar_day_start() -> float:
-    d = datetime.now(timezone.utc).date()
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp()
+    """Midnight on the trading clock. No offset is configured in a test
+    database, so that is this machine's own midnight (owner, 2026-10-10)."""
+    return datetime.now().replace(hour=0, minute=0, second=0,
+                                  microsecond=0).timestamp()
 
 
 class _Bridge:

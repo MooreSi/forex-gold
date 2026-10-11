@@ -116,16 +116,22 @@ class TestTheSyncServerNoLongerTakesIt:
     def test_its_engines_are_the_two_that_exist(self, node):
         # These keys go into every heartbeat, and the Mac's Remote Node page
         # printed "Bounce off" from this dict.
-        assert set(node._sub_engines()) == {"breakout", "reversal_engine"}
+        #
+        # CHANGED 2026-10-11 (owner): Trend PA joined main by name after this
+        # test was written; the property is that "bounce" is absent.
+        assert set(node._sub_engines()) == {"breakout", "reversal_engine", "trend_pa"}
 
     def test_the_stats_payload_has_no_bounce_key(self, node, monkeypatch):
         monkeypatch.setattr(type(node), "_breakout_stats", staticmethod(lambda: {"b": 1}))
         monkeypatch.setattr(type(node), "_reversal_engine_stats",
                             staticmethod(lambda: {"r": 1}))
+        monkeypatch.setattr(type(node), "_trend_pa_stats",
+                            staticmethod(lambda: {"t": 1}))
 
         payload = asyncio.run(node._signal_gen_stats_payload())
 
-        assert set(payload) == {"breakout", "reversal_engine"}
+        # CHANGED 2026-10-11 (owner): trend_pa joined the payload on main.
+        assert set(payload) == {"breakout", "reversal_engine", "trend_pa"}
 
 
 class TestTheAiEvalTableHasOnlyBreakout:

@@ -77,10 +77,11 @@ class _Link:
 @pytest.fixture
 def paired(monkeypatch):
     """This node in Remote mode, linked to a VPS running the real server code."""
-    vps_engines = {"breakout": _Engine(), "bounce": None, "reversal": _Engine()}
+    # CHANGED 2026-10-11 (owner): SyncServer no longer takes bounce_engine
+    # (wip/nice-vaughan); the slot was always None here.
+    vps_engines = {"breakout": _Engine(), "reversal": _Engine()}
     server = sync_server.SyncServer(
         breakout_engine=vps_engines["breakout"],
-        bounce_engine=vps_engines["bounce"],
         re_engine=vps_engines["reversal"],
     )
 

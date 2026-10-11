@@ -20,6 +20,8 @@ class EvidenceStore:
                   available_at REAL NOT NULL, payload TEXT NOT NULL, fingerprint TEXT NOT NULL,
                   UNIQUE(env,source,kind,key,event_ts,fingerprint));
                 CREATE INDEX IF NOT EXISTS evidence_asof ON observations(env,kind,available_at);
+                CREATE INDEX IF NOT EXISTS evidence_latest
+                  ON observations(env,kind,source,key,available_at,id);
                 CREATE TABLE IF NOT EXISTS health (
                   name TEXT PRIMARY KEY, state TEXT, detail TEXT, ts REAL);
                 CREATE TABLE IF NOT EXISTS experiments (
@@ -66,13 +68,34 @@ class EvidenceStore:
             return self.decode(db.execute("SELECT * FROM observations WHERE env=? AND available_at<=? "
                                          "ORDER BY available_at,id", (env, decision_ts)).fetchall())
 
+    CONTEXT_KINDS = ("calendar", "calendar_batch", "cme_book", "futures_bar", "broker_tick")
+
     def context_events(self, env, decision_ts):
+        # Latest arrival per source/kind/key at decision time. Walks the few
+        # groups by index seek rather than sorting every row: broker_tick is
+        # one group holding the whole tick history (644k rows by 2026-10-11),
+        # and a window query over it cost 1.1s per closed trade per minute.
+        rows = []
         with self.connect() as db:
-            return self.decode(db.execute("SELECT * FROM (SELECT *, ROW_NUMBER() OVER "
-                "(PARTITION BY source,kind,key ORDER BY available_at DESC,id DESC) AS latest "
-                "FROM observations WHERE env=? AND available_at<=? "
-                "AND kind IN ('calendar','calendar_batch','cme_book','futures_bar','broker_tick')) "
-                "WHERE latest=1", (env, decision_ts)).fetchall())
+            for kind in self.CONTEXT_KINDS:
+                group = db.execute("SELECT source,key FROM observations WHERE env=? AND kind=? "
+                                   "ORDER BY source,key LIMIT 1", (env, kind)).fetchone()
+                while group:
+                    source, key = group
+                    latest = db.execute("SELECT * FROM observations WHERE env=? AND kind=? AND source=? "
+                                        "AND key=? AND available_at<=? ORDER BY available_at DESC,id DESC "
+                                        "LIMIT 1", (env, kind, source, key, decision_ts)).fetchone()
+                    if latest:
+                        rows.append(latest)
+                    # Two seeks, not (source,key)>(?,?): SQLite scans the rest
+                    # of the group for the row-value form.
+                    group = (db.execute("SELECT source,key FROM observations WHERE env=? AND kind=? "
+                                        "AND source=? AND key>? ORDER BY key LIMIT 1",
+                                        (env, kind, source, key)).fetchone()
+                             or db.execute("SELECT source,key FROM observations WHERE env=? AND kind=? "
+                                           "AND source>? ORDER BY source,key LIMIT 1",
+                                           (env, kind, source)).fetchone())
+        return self.decode(rows)
 
     def labels(self, env):
         with self.connect() as db:

@@ -580,13 +580,13 @@ async def generate_daily_analysis(
     def _trade_summary(t: dict) -> str:
         lots  = float(t.get("lot_size") or 0)
         pnl   = float(t.get("mt5_profit") or t.get("net_pnl") or 0)
-        sl    = t.get("stop_loss")
+        sl    = f"{float(t['stop_loss']):.2f}" if t.get("stop_loss") else "none"
         tps   = [f"TP{i}={t[f'tp{i}']:.2f}" for i in range(1, 9) if t.get(f"tp{i}") is not None]
         return (
             f"trade_id={t.get('trade_id','?')} | {t.get('direction','?')} "
             f"@ entry={float(t.get('entry_price',0)):.2f} "
             f"close={float(t.get('close_price',0)):.2f} "
-            f"lots={lots:.2f} SL={float(sl):.2f if sl else 'none'} "
+            f"lots={lots:.2f} SL={sl} "
             f"{' '.join(tps) if tps else 'no TPs set'} "
             f"exit={t.get('exit_reason','?')} strategy={t.get('strategy','?')} "
             f"pnl=${pnl:+.2f} max_tp_reached={_tp_label(t)}"

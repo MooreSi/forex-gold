@@ -33,7 +33,7 @@ from backend.src.services.cluster.remote.protocol import (
     MSG_REGISTER, MSG_WELCOME, MSG_REJECT, MSG_REVOKE, MSG_LICENCE,
     MSG_PING, MSG_GET_DIAG, MSG_GIT_UPDATE, MSG_VERSION_INFO, make,
 )
-from backend.src.services.cluster.remote import _broker_positions, _feedback
+from backend.src.services.cluster.remote import _broker_positions, _feedback, _lan_scan
 from backend.src.services.cluster.remote.tls import (
     client_ssl_context, peer_is_acceptable, SERVER_HOST, SERVER_PORT,
 )
@@ -114,7 +114,7 @@ async def _scan_lan_for_server() -> str:
     due to NAT hairpinning.
     """
     local_ip = _get_local_ip()
-    if not local_ip:
+    if not _lan_scan.is_scannable(local_ip):  # public address: never sweep a provider's /24
         return ""
     prefix = ".".join(local_ip.split(".")[:3])  # e.g. "192.168.0"
 

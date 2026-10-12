@@ -761,3 +761,27 @@ wire name back; nothing on the Mac reads the ack's `engine`. Pinned end to end
 (router, remote_control, the real client, the real server dispatch and its
 real `_sub_engines` keys) by
 `tests/api/routers/test_engine_control_wire_names.py`.
+
+## The LAN-discovery scan never runs from a public address (2026-10-12)
+
+The remote client tries the admin server's UDP beacon, then (`client.py`,
+`_scan_lan_for_server`) TCP-probes every host on its local /24 for port 8443,
+then falls back to the WAN address. On a VPS the adapter carries the public
+address itself (`38.253.124.25/23` on the owner's), so that "local /24" is the
+hosting provider's other customers. With the admin server unreachable, the
+scan ran on every retry, about 76 seconds apart: roughly 3,000 connection
+attempts between 15:52 and 16:12 UTC, the provider's security systems cut the
+VPS off the network (SSH, WinRM and RDP included), and an outbound 8443 block
+stayed in place until the scan was fixed.
+
+`_lan_scan.is_scannable()` now gates the scan: only a private or loopback
+address is swept, and a public, empty or unparseable one is not. The beacon and
+the WAN fallback are untouched. Pinned, with the real scan and a probe counter,
+by `tests/remote/test_lan_scan_stays_on_private_networks.py`.
+
+**Still open:** a VPS on a *private* provider network (an RFC1918 address)
+would still sweep its /24, and the scan is not rate-limited. The 10.30.17.85:443
+attempt the provider reported is not in this repo or the VPS's app log; its
+source is unidentified. The reason the VPS could not reach the admin server on
+217.155.25.160:8443 (it had been failing with `WinError 121` since at least
+2026-10-12 00:02) was not diagnosed.

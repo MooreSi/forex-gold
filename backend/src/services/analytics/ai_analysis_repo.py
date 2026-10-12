@@ -412,7 +412,7 @@ def _gather_signal_generator_data(db_path: str, days: int) -> dict:
     """
     Gather per-strategy (internal signal generator) performance data.
     Splits the window into first-half vs second-half to detect improvement trends.
-    Returns a dict ready for Claude analysis.
+    Returns a dict ready for AI analysis.
     """
     since_ts = time.time() - days * 86400
     mid_ts   = since_ts + (days / 2) * 86400

@@ -122,14 +122,14 @@ async def cmd_report(args: list, bridge: Any, cfg: dict) -> str:
     _balance    = float(perf.get("balance", 0) or 0)
     _dpnl       = float(perf.get("daily_pnl", 0) or 0)
     try:
-        claude_analysis = await claude_ai.generate_daily_analysis(
+        ai_analysis = await claude_ai.generate_daily_analysis(
             closed_today, _balance, _dpnl, cfg,
         )
     except Exception as _ae:
-        log.warning("Daily Claude analysis (manual report) failed: %s", _ae)
-        claude_analysis = None
+        log.warning("Daily AI analysis (manual report) failed: %s", _ae)
+        ai_analysis = None
     html    = email_service.build_daily_html(perf, closed_today, today_str,
-                                              claude_analysis=claude_analysis)
+                                              claude_analysis=ai_analysis)
     ok, err = await email_service.send_email(
         f"FOREX Trader Daily Report — {_clock.now().strftime('%Y-%m-%d')}", html, ecfg
     )

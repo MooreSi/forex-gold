@@ -12,7 +12,7 @@ Reuses core_orb_report.build_orb_report/orb_auto_execute and
 core_mt5_performance.compute_mt5_performance as collaborators (all three
 already extracted and independently characterized) rather than re-deriving
 them. `is_active_trader_node`/`cfg_obj` (the engine's own `self._cfg`,
-forwarded to Claude for the daily analysis) are taken as explicit
+forwarded to the selected AI provider for the daily analysis) are taken as explicit
 parameters, same pattern as every other pack in this cluster.
 
 Note: the ORB section's time gate uses Europe/London
@@ -168,16 +168,16 @@ async def _run_daily_section(bridge: Any, cfg: dict, cfg_obj: Any,
     _balance = float(perf.get("balance", 0) or 0)
     _dpnl = float(perf.get("daily_pnl", 0) or 0)
     try:
-        claude_analysis = await claude_ai.generate_daily_analysis(
+        ai_analysis = await claude_ai.generate_daily_analysis(
             closed_today, _balance, _dpnl, cfg_obj,
         )
     except Exception as _ae:
-        log.warning("Daily Claude analysis failed: %s", _ae)
-        claude_analysis = None
+        log.warning("Daily AI analysis failed: %s", _ae)
+        ai_analysis = None
     html = email_service.build_daily_html(
         perf, closed_today,
         local_now.strftime("%A, %d %B %Y"),
-        claude_analysis=claude_analysis,
+        claude_analysis=ai_analysis,
     )
     ok, err = await email_service.send_email(
         f"FOREX Trader Daily Summary — {today_str}", html, cfg

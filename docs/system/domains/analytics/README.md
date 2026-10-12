@@ -24,7 +24,7 @@ email + Telegram notification config.
 - `services/analytics/orb_ny.py` — the New York ORB (2026-10-01): the decision `orb_auto_execute` acts on when Expert Tunable `orb_ny_mode` is 1
 - `services/analytics/reporting.py`, `ai_analysis.py`, `signal_lab_repo.py` — performance computation, the AI Trade Analysis page's cross-DB gathers, read-only access to `test_signal.db`
 - `services/ai/provider.py` — unified `complete()` over Anthropic/DeepSeek, selected by `cfg["ai_provider"]`
-- `services/ai/claude_ai.py` — per-use-case prompts, JSON schemas and fallback dicts
+- `services/ai/claude_ai.py` — per-use-case prompts, JSON schemas and fallback dicts. The module name is historical: every function runs on the provider selected in Settings > AI, so user-visible text says "AI", never "Claude" (the `claude_analysis` keyword and column are an internal contract tests pin). `generate_daily_analysis` formats each trade's prompt line OUTSIDE its `try`, so a bad row raises to the caller (the scheduler logs "Daily AI analysis failed" and sends the email without the section). Until 2026-10-12 an invalid f-string for the stop loss raised on every closed trade, so the daily email never carried the AI section on a day the account traded; pinned by `tests/services/ai/test_daily_analysis.py`
 - `services/ai/signal_extractor.py` — LLM fallback signal extraction after regex parsers fail
 - `services/ai/model_refresh_loop.py`, `commentary_repo.py`, `recovered_repo.py` — daily model-catalogue refresh, persistence
 - `services/notifications/email_service.py` — transport only (SMTP / Resend / Mailjet)

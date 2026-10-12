@@ -101,7 +101,7 @@ def _verdict_color(v: str) -> str:
     return {"good": _GREEN, "ok": _GOLD, "poor": _RED}.get(v.lower(), _SUB)
 
 
-def _claude_analysis_html(analysis: dict) -> str:
+def _ai_analysis_html(analysis: dict) -> str:
     if not analysis or not analysis.get("overall_summary"):
         return ""
 
@@ -169,12 +169,12 @@ def _claude_analysis_html(analysis: dict) -> str:
     ) if focus_html else ""
 
     return f"""
-  <!-- Claude analysis section -->
+  <!-- AI analysis section -->
   <tr><td style="background:{_DARK};padding:20px 24px 8px;">
     <table width="100%" cellpadding="0" cellspacing="0">
       <tr><td style="border-left:3px solid #a855f7;padding:0 0 0 12px;">
         <p style="margin:0;color:#a855f7;font-size:10px;text-transform:uppercase;
-                  letter-spacing:2px;font-weight:bold;">Claude AI Coaching</p>
+                  letter-spacing:2px;font-weight:bold;">AI Coaching</p>
         <p style="margin:4px 0 0;color:{verdict_color};font-size:13px;font-weight:bold;">
           {analysis.get('overall_summary','')}</p>
       </td></tr>
@@ -318,7 +318,7 @@ def build_daily_html(
     </table>
   </td></tr>
 
-  {_claude_analysis_html(claude_analysis) if claude_analysis else ''}
+  {_ai_analysis_html(claude_analysis) if claude_analysis else ''}
 
   {_footer_html("Daily")}
 

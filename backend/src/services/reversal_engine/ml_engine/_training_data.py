@@ -88,6 +88,27 @@ def _learning_switches() -> tuple[bool, bool]:
         return False, False
 
 
+def effective_n(n: int, weights: Optional[list] = None) -> float:
+    """How many rows a fit's weights are worth (Kish). With no weights, the
+    positional ones `_fit_batch` applies by default."""
+    from backend.src.services.market import sample_weights as _sw
+    w = weights if weights is not None else [
+        math.exp(-0.017 * (n - i)) for i in range(n)]
+    return round(_sw.effective_size(w), 1)
+
+
+def learning_description() -> dict:
+    """What the next fit learns from, in words, for the "Is it learning?" panel."""
+    decay_on, executed_on = _learning_switches()
+    return {
+        "label": "realised R (net over the signal's own risk)",
+        "learns_from_executed": executed_on,
+        "weights": (f"by age: half-life {DECAY_HALF_LIFE_DAYS:g} days, floor "
+                    f"{DECAY_FLOOR:g}, overlap discounted") if decay_on
+        else "positional (newest rows weighted most)",
+    }
+
+
 def _span(row: dict) -> tuple[float, float]:
     """When the label was live: trigger (or creation) to close."""
     start = float(row.get("trigger_time") or row.get("created_at") or 0.0)

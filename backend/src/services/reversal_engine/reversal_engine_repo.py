@@ -625,7 +625,7 @@ def fetch_ml_outcome_rows() -> list:
     """Completed, ML-scored RE signals -- the calibration-report corpus."""
     return get_db().all(
         "SELECT id, signal_ref, ml_prob, outcome, rr_tp1, sl_dist, net_pnl_dollars, "
-        "live_exec_status FROM re_signals "  # _realised_r leaves executed rows out
+        "live_exec_status, vantage_signal_id FROM re_signals "  # executed: docs/todo/017
         "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
         "ORDER BY id"
     )

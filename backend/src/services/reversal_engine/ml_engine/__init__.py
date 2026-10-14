@@ -385,6 +385,7 @@ from ._training_data import (  # noqa: E402
     _VIRTUAL_LOT, _DOLLARS_PER_POINT, _R_LABEL_CLAMP,
     _realised_r, _get_training_data, _labeled_count_from_db, stored_vector,
     _get_training_set, training_label, executed_risk_for, _learning_switches,
+    effective_n, learning_description,
 )
 
 
@@ -448,6 +449,7 @@ def _retrain() -> None:
         return
     model, backend, mean_r = _fit_batch(X, y, *([] if w is None else [w]))
     _install_batch(model, backend, len(X), mean_r)
+    _train_history[-1]["effective_n"] = effective_n(len(X), w)
 
 
 async def retrain_async() -> None:
@@ -463,6 +465,7 @@ async def retrain_async() -> None:
         return
     model, backend, mean_r = await asyncio.to_thread(_fit_batch, X, y, *([] if w is None else [w]))
     _install_batch(model, backend, len(X), mean_r)
+    _train_history[-1]["effective_n"] = effective_n(len(X), w)
 
 
 _retrain_task = None
@@ -717,21 +720,30 @@ def get_ml_metrics() -> dict:
         "labeled_count":    _labeled_count,
         "online_update_health": dict(_online_update_health),
     }
+    # docs/todo/017: say what the model learns from, and how many rows the
+    # last fit's weights were worth.
+    learning = {**learning_description(), "executed_plotted": 0,
+                "effective_n": (_train_history[-1].get("effective_n") if _train_history else None)}
+    _blank["learning"] = learning
     try:
         from backend.src.services.reversal_engine import reversal_engine_repo as re_db
-        rows = re_db.fetch_ml_outcome_rows()
+        rows = [dict(r) for r in re_db.fetch_ml_outcome_rows()]
         if not rows:
             return _blank
+        risk = executed_risk_for(rows)
 
         signal_ids, pred_rs, actual_rs, actuals_win = [], [], [], []
         for row in rows:
             outcome = (row["outcome"] or "").lower()
             if outcome not in ("win", "loss", "be"):
                 continue
-            # Same realised-R definition the model is now trained on, so the
-            # panel's "mean actual R" matches the money in re_balance_log
-            # instead of the planned-target fiction it used to plot.
-            actual_r = _realised_r(dict(row))
+            # Realised R, so "mean actual R" matches the money. A real trade
+            # is plotted on its core trade's recorded risk (docs/todo/017),
+            # whether or not the model is switched to learn from it.
+            actual_r = _realised_r(row)
+            if actual_r is None and row.get("live_exec_status") == "executed":
+                actual_r = training_label(row, risk)
+                learning["executed_plotted"] += actual_r is not None
             if actual_r is None:
                 continue
             signal_ids.append(row["signal_ref"] or str(row["id"]))
@@ -769,6 +781,7 @@ def get_ml_metrics() -> dict:
             "train_history":    _train_history,
             "labeled_count":    _labeled_count,
             "online_update_health": dict(_online_update_health),
+            "learning":         learning,
         }
     except Exception as e:
         _log.debug("[RE-ML] metrics error: %s", e)

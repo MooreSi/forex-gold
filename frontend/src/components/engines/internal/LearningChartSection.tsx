@@ -1,4 +1,5 @@
 import { asArray } from "@/lib/asArray";
+import { LearningSourceLine } from "./LearningSourceLine";
 import { plotPoints, rollingMean, WINDOW } from "./learning_series";
 
 interface LearningChartSectionProps {
@@ -40,6 +41,7 @@ export function LearningChartSection({ metrics, summary }: LearningChartSectionP
   const ids = asArray<unknown>(metrics["signal_ids"]);
   const winFlags = asArray<number | null>(metrics["win_flag_series"]);
   const actualR = asArray<number | null>(metrics["actual_r_series"]);
+  const learning = metrics["learning"] as Record<string, unknown> | undefined;
 
   if (ids.length === 0 || winFlags.length === 0) {
     const labelled = num(summary["labeled_count"]);
@@ -60,6 +62,7 @@ export function LearningChartSection({ metrics, summary }: LearningChartSectionP
             Needs {remaining} more closed signals before the first training run.
           </p>
         )}
+        <LearningSourceLine learning={learning} />
       </div>
     );
   }
@@ -111,6 +114,7 @@ export function LearningChartSection({ metrics, summary }: LearningChartSectionP
         lines use different scales and are not comparable to each other; read
         each against the midline.
       </p>
+      <LearningSourceLine learning={learning} />
     </div>
   );
 }

@@ -762,8 +762,8 @@ def fetch_main_close_ro(mt5_ticket) -> object:
 def fetch_ml_outcome_rows() -> list:
     """Completed, ML-scored BO signals -- the calibration-report corpus."""
     return get_db().all(
-        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1 "
-        "FROM bo_signals "
+        "SELECT id, signal_ref, ml_prob, outcome, rr_tp1, sl_dist, lot_size, net_pnl_dollars, "
+        "pnl_dollars, live_exec_status FROM bo_signals "
         "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
         "ORDER BY id"
     )

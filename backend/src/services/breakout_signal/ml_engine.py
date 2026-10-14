@@ -537,6 +537,7 @@ def _retrain() -> None:
         "n_samples":           len(X_list),
         "cv_auc":              cv_auc,
         "feature_importances": fi,
+        "effective_n":         _lb.effective_n(w_list),
     })
 
 
@@ -661,6 +662,7 @@ def get_ml_metrics() -> dict:
         "accuracy":         None,
         "train_history":    _train_history,
         "labeled_count":    _labeled_count,
+        "learning":         _lb.learning_description(_label_mode, _gate_armed, _train_history),
     }
     if not _ML_AVAILABLE:
         return _blank
@@ -676,8 +678,11 @@ def get_ml_metrics() -> dict:
             outcome = (row[3] or "").lower()
             if outcome not in ("win", "loss", "be"):
                 continue
-            rr_tp1 = float(row[4] or 1.0)
-            actual_r = rr_tp1 if outcome == "win" else (-1.0 if outcome == "loss" else 0.0)
+            # Realised R, whatever the model trains on: the legend has always
+            # said "realised R", and the old label plotted +1 / -1 (017).
+            actual_r = _lb.realised_r(_lb.outcome_row(row))
+            if actual_r is None:
+                continue
             signal_ids.append(row[1] or str(row[0]))
             pred_rs.append(float(row[2]))
             actual_rs.append(actual_r)
@@ -723,6 +728,7 @@ def get_ml_metrics() -> dict:
             "accuracy":         accuracy,
             "train_history":    _train_history,
             "labeled_count":    _labeled_count,
+            "learning":         _blank["learning"],
         }
     except Exception as e:
         _log.debug("[BO-ML] metrics error: %s", e)

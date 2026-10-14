@@ -113,6 +113,35 @@ def row_label(row: dict, label_mode: str) -> Optional[float]:
     return legacy_label(row.get("outcome", "loss"), row.get("rr_tp1"))
 
 
+_OUTCOME_COLUMNS = ("id", "signal_ref", "ml_prob", "outcome", "rr_tp1", "sl_dist",
+                    "lot_size", "net_pnl_dollars", "pnl_dollars", "live_exec_status")
+
+
+def outcome_row(row) -> dict:
+    """A `fetch_ml_outcome_rows` row (positional) as a dict."""
+    return dict(zip(_OUTCOME_COLUMNS, tuple(row)))
+
+
+def effective_n(weights) -> float:
+    from backend.src.services.market import sample_weights as _sw
+    return round(_sw.effective_size(list(weights)), 1)
+
+
+def learning_description(label_mode: str, gate_armed: bool, history: list) -> dict:
+    """What the model learns from, for the "Is it learning?" panel."""
+    last = history[-1] if history else {}
+    decay_on = switches()[0]
+    return {
+        "label": "realised R" if label_mode == REALISED else "rr_tp1 / -1 / 0 (the old label)",
+        "weights": (f"by age: half-life {DECAY_HALF_LIFE_DAYS:g} days, floor "
+                    f"{DECAY_FLOOR:g}, overlap discounted") if decay_on
+        else "positional (40-trade half-life)",
+        "armed": bool(gate_armed),
+        "holdout_auc": last.get("cv_auc") if label_mode == REALISED else None,
+        "effective_n": last.get("effective_n"),
+    }
+
+
 def online_weight(label: float, label_mode: str) -> float:
     """The online learner's 2x on losses belongs to the +1 / -1 label only."""
     if label_mode == REALISED:

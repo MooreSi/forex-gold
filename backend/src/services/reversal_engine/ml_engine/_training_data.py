@@ -69,8 +69,71 @@ def _realised_r(row: dict) -> Optional[float]:
         return None
 
 
+# docs/todo/017 item 1. Provisional: a two-week half-life and a floor of a
+# quarter. The offline replay (tools/ml_weight_replay.py) is what says whether
+# any setting beats today's positional weights; until it does, the switch
+# stays off and these are only what "on" would mean.
+DECAY_HALF_LIFE_DAYS = 14.0
+DECAY_FLOOR = 0.25
+
+
+def _learning_switches() -> tuple[bool, bool]:
+    """(re_ml_time_decay_enabled, re_ml_learn_from_executed). Off on any failure."""
+    try:
+        from backend.src.db import database as _db
+        from backend.src.services.risk import capability_gates as _caps
+        rs = _db.get_risk_settings() or {}
+        return bool(_caps.re_ml_time_decay_enabled(rs)), bool(_caps.re_ml_learn_from_executed(rs))
+    except Exception:
+        return False, False
+
+
+def _span(row: dict) -> tuple[float, float]:
+    """When the label was live: trigger (or creation) to close."""
+    start = float(row.get("trigger_time") or row.get("created_at") or 0.0)
+    end = float(row.get("close_time") or start)
+    return start, max(start, end)
+
+
+def training_label(row: dict, executed_risk: Optional[dict] = None) -> Optional[float]:
+    """The label the model learns for `row`: `_realised_r` for a virtual row;
+    for an executed one, its core trade's net over its recorded initial risk
+    when `executed_risk` holds it (docs/todo/017 item 2), else None."""
+    if row.get("live_exec_status") != "executed":
+        return _realised_r(row)
+    if not executed_risk:
+        return None
+    pair = executed_risk.get(str(row.get("vantage_signal_id") or ""))
+    if pair is None:
+        return None
+    from backend.src.services.reversal_engine import executed_label as _xl
+    return _xl.label(*pair)
+
+
+def executed_risk_for(rows: list) -> dict:
+    """The core trades' (net, initial_risk) for every executed row, or {}."""
+    ids = [r.get("vantage_signal_id") for r in rows
+           if r.get("live_exec_status") == "executed" and r.get("vantage_signal_id")]
+    if not ids:
+        return {}
+    from backend.src.services.reversal_engine import executed_label as _xl
+    try:
+        return _xl.fetch_closed_risk(ids)
+    except Exception as exc:
+        _log.debug("[RE-ML] executed risk lookup error: %s", exc)
+        return {}
+
+
 def _get_training_data():
     """Pull closed signals with features from DB. Returns (X, y) where y is R-multiple."""
+    X, y, _ = _get_training_set()
+    return X, y
+
+
+def _get_training_set():
+    """(X, y, weights). `weights` is None unless `re_ml_time_decay_enabled`
+    is on, which leaves the fit on its positional weights exactly as before.
+    Executed rows join only with `re_ml_learn_from_executed` on."""
     try:
         from backend.src.services.reversal_engine import reversal_engine_repo as re_db
         from backend.src.services.reversal_engine import vol_regime as _vol
@@ -84,11 +147,13 @@ def _get_training_data():
                     pass
             except Exception as exc:
                 _log.debug("[RE-ML] vol_regime backfill error: %s", exc)
+        decay_on, executed_on = _learning_switches()
         rows = re_db.get_ml_training_data()
         # Oldest first: _fit_batch weights row i by its position, and the
         # query has no ORDER BY to promise that.
         rows = sorted(rows, key=lambda r: r.get("id") or 0)
-        X, y = [], []
+        risk = executed_risk_for(rows) if executed_on else None
+        X, y, spans = [], [], []
         for r in rows:
             f = stored_vector(r)
             if f is None:
@@ -96,15 +161,20 @@ def _get_training_data():
             outcome = r.get("outcome", "")
             if outcome not in ("win", "loss", "be"):
                 continue
-            label = _realised_r(r)
+            label = training_label(r, risk)
             if label is None:
                 continue
             X.append(f + _vol.row_tail(r, vol_on))
             y.append(label)
-        return X, y
+            spans.append(_span(r))
+        weights = None
+        if decay_on and X:
+            from backend.src.services.market import sample_weights as _sw
+            weights = _sw.training_weights(spans, DECAY_HALF_LIFE_DAYS, DECAY_FLOOR)
+        return X, y, weights
     except Exception as exc:
         _log.debug("[RE-ML] training data error: %s", exc)
-        return [], []
+        return [], [], None
 
 
 def stored_vector(row: dict) -> Optional[list]:

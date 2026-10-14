@@ -148,6 +148,7 @@ def init(db_path: str) -> None:
         ("mfe_pts",             "REAL"),
         ("mae_pts",             "REAL"),
         ("excursion_source",    "TEXT"),
+        ("market_state_json",   "TEXT"),   # docs/todo/017
     ]:
         if col not in cols:
             get_db().run(f"ALTER TABLE bo_signals ADD COLUMN {col} {defn}")
@@ -505,7 +506,8 @@ def get_ml_features_for_signal(signal_id: int) -> Optional[str]:
 
 def get_ml_training_data() -> list[dict]:
     rows = get_db().all(
-        """SELECT id, ml_features_json, outcome, rr_tp1
+        """SELECT id, ml_features_json, outcome, rr_tp1, sl_dist, lot_size, net_pnl_dollars,
+                  pnl_dollars, live_exec_status, created_at, trigger_time, close_time
            FROM bo_signals
            WHERE status='closed'
              AND outcome IN ('win','loss','be')

@@ -93,6 +93,7 @@ def _run_migrations() -> None:
         "ALTER TABLE re_signals ADD COLUMN tpl_r REAL",
         # ATR against its own five-day median at creation (docs/todo/016).
         "ALTER TABLE re_signals ADD COLUMN atr_ratio REAL",
+        "ALTER TABLE re_signals ADD COLUMN market_state_json TEXT",  # docs/todo/017
     ]
     for stmt in migrations:
         try:

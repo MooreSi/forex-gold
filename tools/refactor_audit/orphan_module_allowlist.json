@@ -85,6 +85,20 @@
       "loc": 94,
       "class": "unwired-tool",
       "reason": "The pre-registered bar the Dukascopy replay is judged by, kept as code so a report cannot grade itself on a softer curve. Imported by the two research tools only. Pinned by tests/reversal_engine/test_replay_verdict.py. Delete this entry if it is wired or removed."
+    },
+    {
+      "module": "backend.src.services.reversal_engine.weight_replay",
+      "file": "backend/src/services/reversal_engine/weight_replay.py",
+      "loc": 103,
+      "class": "unwired-tool",
+      "reason": "docs/todo/017 step 1b: walk-forward replay of the Reversal batch model under different training weights, to decide whether re_ml_time_decay_enabled's weights beat today's positional ones. Pure; its caller is tools/ml_weight_replay.py, which is not an app entrypoint. Research only: it never loads, saves or replaces the live model. First run 2026-10-14: no variant beat today's. Pinned by tests/reversal_engine/test_weight_replay.py. Delete this entry if it is wired or removed."
+    },
+    {
+      "module": "backend.src.services.analytics.regime_table",
+      "file": "backend/src/services/analytics/regime_table.py",
+      "loc": 86,
+      "class": "unwired-tool",
+      "reason": "docs/todo/017 item 4: expectancy by market-state cell (trend with/against/range, volatility, session) with 2-hour clustered intervals and both halves of the sample. Pure; the database read is in tools/regime_table.py, which is its caller and is not an app entrypoint. Whether it gets a panel is not decided. Pinned by tests/analytics/test_regime_table.py. Delete this entry if it is wired or removed."
     }
   ]
 }

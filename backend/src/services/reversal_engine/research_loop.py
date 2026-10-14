@@ -56,6 +56,12 @@ from backend.src.services.reversal_engine.edge_model import (
 from backend.src.services.reversal_engine.vol_regime import (
     vol_ratio_sweep as _vol_ratio_sweep_impl,
 )
+from backend.src.services.reversal_engine.market_state_sweep import (
+    market_state_sweep as _re_market_state_sweep_impl,
+)
+from backend.src.services.breakout_signal.market_state_sweep import (
+    market_state_sweep as _bo_market_state_sweep_impl,
+)
 
 
 log = logging.getLogger(__name__)
@@ -129,6 +135,20 @@ async def _research_loop(engine: Any, is_running: Callable[[], bool]) -> None:
             break
         except Exception as e:
             log.warning("_xasset_sweep error: %s", e)
+        # Each signal's market state (trend/range, volatility, session), one
+        # day per engine per pass, newest first. docs/todo/017 item 4.
+        try:
+            await _re_market_state_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_re_market_state_sweep error: %s", e)
+        try:
+            await _bo_market_state_sweep_impl(engine)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("_bo_market_state_sweep error: %s", e)
         # The template's own exits for every triggered signal, one day per
         # pass, newest first; then the edge model's daily refit on them.
         # docs/todo/reversal-engine/240.

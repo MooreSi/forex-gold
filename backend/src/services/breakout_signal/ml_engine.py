@@ -76,6 +76,7 @@ except ImportError:
 _ML_AVAILABLE = _NP and _SK
 
 from backend.src.services.breakout_signal import ml_handover as _ho  # noqa: E402
+from backend.src.services.breakout_signal import ml_labels as _lb  # noqa: E402
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 MIN_TRAIN_SAMPLES = 15
@@ -137,6 +138,10 @@ _data_dir:     Optional[Path]   = None
 _labeled_count: int = 0
 _new_since_retrain: int = 0
 _train_history: list = []               # [{ts, n_samples, cv_auc, feature_importances}]
+# docs/todo/017: the label the current models were fitted under, and whether
+# the model has earned an opinion. Both only move with bo_ml_realised_r_label.
+_label_mode: str = _lb.LEGACY
+_gate_armed: bool = True
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
@@ -281,7 +286,10 @@ def predict(features: list[float]) -> Optional[float]:
     """Return predicted R-multiple or None if model not yet trained.
     Positive = expected profitable, negative = expected losing.
     Blends batch model (60%) + online SGD (40%) when both available."""
-    if not _ML_AVAILABLE or not is_trained():
+    if not _ML_AVAILABLE:
+        return None
+    _check_label_epoch()
+    if not is_trained() or not _gate_armed:
         return None
     if not features or len(features) != N_FEATURES:
         return None
@@ -347,7 +355,10 @@ def record_outcome(signal_id: int, outcome: str) -> None:
         rr_tp1 = float((sig_row or {}).get("rr_tp1") or 1.0)
     except Exception:
         pass
-    label = rr_tp1 if outcome == "win" else (-1.0 if outcome == "loss" else 0.0)
+    _check_label_epoch()
+    label = _lb.row_label(dict(sig_row or {}, outcome=outcome, rr_tp1=rr_tp1), _label_mode)
+    if label is None:
+        return
     _labeled_count    += 1
     _new_since_retrain += 1
 
@@ -375,7 +386,7 @@ def _online_update(features: list[float], label: float) -> None:
                 ("reg",    SGDRegressor(loss="huber", epsilon=0.1, max_iter=1,
                                         warm_start=True, random_state=42)),
             ])
-        sw = np.array([2.0 if label < 0 else 1.0])  # weight losses higher
+        sw = np.array([_lb.online_weight(label, _label_mode)])  # losses 2x on the old label
         _model_online.named_steps["scaler"].partial_fit(X)
         X_s = _model_online.named_steps["scaler"].transform(X)
         _model_online.named_steps["reg"].partial_fit(X_s, np.array([label]), sample_weight=sw)
@@ -386,17 +397,42 @@ def _online_update(features: list[float], label: float) -> None:
 
 # ── Batch retrain ─────────────────────────────────────────────────────────────
 
+def _check_label_epoch() -> None:
+    """A model fitted under one label never scores under the other
+    (docs/todo/017). On a switch flip: drop the online learner, refit, and if
+    there is too little to refit on, hold no opinion rather than the old one."""
+    global _model, _model_online, _label_mode, _gate_armed
+    want = _lb.mode()
+    if want == _label_mode:
+        return
+    _model_online = None
+    _retrain()
+    if _label_mode != want:
+        _model, _label_mode, _gate_armed = None, want, want == _lb.LEGACY
+
+
+def _fit_lgb(X: list, y: list, w: list):
+    import lightgbm as lgb
+    params = {"objective": "regression", "metric": "l2", "num_leaves": 15,
+              "learning_rate": 0.05, "feature_fraction": 0.8, "verbose": -1,
+              "min_data_in_leaf": 3, "n_estimators": 100}
+    return lgb.train(params, lgb.Dataset(np.array(X, dtype=float), label=np.array(y, dtype=float),
+                                         weight=np.array(w, dtype=float)), num_boost_round=100)
+
+
 def _retrain() -> None:
-    global _model, _model_online, _labeled_count
+    global _model, _model_online, _labeled_count, _label_mode, _gate_armed
     if not _ML_AVAILABLE:
         return
+    decay_on, _ = _lb.switches()
+    mode = _lb.mode()
 
     from backend.src.services.breakout_signal import breakout_signal_repo as bdb
     rows = bdb.get_ml_training_data()
     if not rows:
         return
 
-    X_list, y_list, w_list = [], [], []
+    X_list, y_list, w_list, spans = [], [], [], []
     n = len(rows)
     for i, row in enumerate(rows):
         try:
@@ -405,16 +441,19 @@ def _retrain() -> None:
             feats = _pad_legacy(feats) if feats else None
             if not feats:
                 continue
-            # R-multiple: win uses rr_tp1, loss = -1.0, be = 0.0
-            _outcome = row.get("outcome", "loss")
-            _rr = float(row.get("rr_tp1") or 1.0)
-            label = _rr if _outcome == "win" else (-1.0 if _outcome == "loss" else 0.0)
+            # rr_tp1 / -1 / 0, or realised R with bo_ml_realised_r_label on
+            label = _lb.row_label(row, mode)
+            if label is None:
+                continue
             weight = math.exp(math.log(0.5) / DECAY_HALFLIFE * (n - 1 - i))
             X_list.append(feats)
             y_list.append(label)
             w_list.append(weight)
+            spans.append(_lb.span(row))
         except Exception:
             continue
+    if decay_on and X_list:
+        w_list = _lb.time_weights(spans)
 
     if len(X_list) < MIN_TRAIN_SAMPLES:
         _log.debug("[BO-ML] Not enough labeled samples yet (%d/%d)", len(X_list), MIN_TRAIN_SAMPLES)
@@ -425,9 +464,21 @@ def _retrain() -> None:
     w = np.array(w_list, dtype=float)
 
     _labeled_count = len(X_list)
+    if mode != _label_mode:
+        _model_online = None        # fitted under the other label
+    _label_mode = mode
 
     fi: dict = {}
     cv_auc: float = 0.5
+    _gate_armed = True
+    if mode == _lb.REALISED:
+        try:
+            _ho_auc = _lb.holdout_auc(X_list, y_list, w_list, _fit_lgb if _LGB else None)
+        except Exception as e:
+            _log.warning("[BO-ML] holdout check failed: %s", e)
+            _ho_auc = None
+        _gate_armed = _lb.armed(_ho_auc)
+        cv_auc = round(_ho_auc[0], 4) if _ho_auc is not None else 0.5
     _lgb_ok = False
 
     if _LGB:
@@ -507,7 +558,8 @@ def _save_all() -> None:
         # hands over again.
         return
     try:
-        meta = {"labeled_count": _labeled_count, "version": MODEL_VERSION}
+        meta = {"labeled_count": _labeled_count, "version": MODEL_VERSION,
+                "label_mode": _label_mode, "gate_armed": _gate_armed}
         joblib.dump(meta, _model_path("meta"))
         if _model is not None:
             joblib.dump(_model, _model_path("batch"))
@@ -518,7 +570,7 @@ def _save_all() -> None:
 
 
 def _load_all() -> None:
-    global _model, _model_online, _labeled_count
+    global _model, _model_online, _labeled_count, _label_mode, _gate_armed
     if not _ML_AVAILABLE or _data_dir is None:
         return
     try:
@@ -529,6 +581,8 @@ def _load_all() -> None:
                 _log.info("[BO-ML] Model version mismatch — starting fresh")
                 return
             _labeled_count = meta.get("labeled_count", 0)
+            _label_mode = meta.get("label_mode", _lb.LEGACY)
+            _gate_armed = bool(meta.get("gate_armed", True))
     except Exception:
         return
 

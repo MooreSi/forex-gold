@@ -241,6 +241,36 @@ def vol_regime_feature_enabled(rs: dict) -> bool:
     return _on(rs, "re_vol_regime_feature_enabled")
 
 
+# ── How the ML models learn (docs/todo/017, migration 62) ──────────────────
+# Off, each model's weights and labels are exactly what they were before the
+# switch existed. On, the next retrain uses the new ones, which changes which
+# signals that engine's ML gate passes: flipped on demo first.
+
+def re_ml_time_decay_enabled(rs: dict) -> bool:
+    """Does the Reversal batch model weight its training rows by age in days
+    (with a floor) and by uniqueness, instead of by row position?"""
+    return _on(rs, "re_ml_time_decay_enabled")
+
+
+def bo_ml_time_decay_enabled(rs: dict) -> bool:
+    """The same for the Breakout batch model."""
+    return _on(rs, "bo_ml_time_decay_enabled")
+
+
+def re_ml_learn_from_executed(rs: dict) -> bool:
+    """Does the Reversal model learn from executed trades, labelled as the
+    broker's net over the trade's own recorded initial risk? Off, executed
+    rows are left out of training, as they have been since 2026-09-30."""
+    return _on(rs, "re_ml_learn_from_executed")
+
+
+def bo_ml_realised_r_label(rs: dict) -> bool:
+    """Does the Breakout model learn realised R (net dollars over the signal's
+    own risk) instead of rr_tp1 / -1 / 0, and hold its opinion until a
+    time-ordered holdout shows it can rank trades?"""
+    return _on(rs, "bo_ml_realised_r_label")
+
+
 def require_proven_edge(rs: dict) -> bool:
     """Must the Reversal Engine's edge model have PROVEN itself before any
     Reversal order is placed?

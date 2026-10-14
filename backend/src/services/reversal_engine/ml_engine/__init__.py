@@ -384,10 +384,11 @@ def ref_match_rate_for_type(level_type: str) -> Optional[float]:
 from ._training_data import (  # noqa: E402
     _VIRTUAL_LOT, _DOLLARS_PER_POINT, _R_LABEL_CLAMP,
     _realised_r, _get_training_data, _labeled_count_from_db, stored_vector,
+    _get_training_set, training_label, executed_risk_for, _learning_switches,
 )
 
 
-def _fit_batch(X: list, y: list) -> tuple:
+def _fit_batch(X: list, y: list, sample_weights: Optional[list] = None) -> tuple:
     """Fit a batch model into a LOCAL and return it, with what to record.
 
     Pure: reads and writes no module state, so it can run on a worker thread
@@ -400,9 +401,11 @@ def _fit_batch(X: list, y: list) -> tuple:
     Xa = np.array(X, dtype=float)
     ya = np.array(y, dtype=float)
 
-    # Time-decay weights
+    # Time-decay weights: positional unless docs/todo/017's switch passed some
     weights = np.array([math.exp(-0.017 * (len(X) - i)) for i in range(len(X))])
     weights = weights / weights.sum() * len(weights)
+    if sample_weights is not None:
+        weights = np.array(sample_weights, dtype=float)
 
     # Try LightGBM regressor, fall back to RandomForestRegressor
     try:
@@ -440,10 +443,10 @@ def _install_batch(model, backend: str, n: int, mean_r: float) -> None:
 
 
 def _retrain() -> None:
-    X, y = _get_training_data()
+    X, y, w = _get_training_set()
     if len(X) < _MIN_TRAIN:
         return
-    model, backend, mean_r = _fit_batch(X, y)
+    model, backend, mean_r = _fit_batch(X, y, *([] if w is None else [w]))
     _install_batch(model, backend, len(X), mean_r)
 
 
@@ -455,10 +458,10 @@ async def retrain_async() -> None:
     loop, so every reader sees the old fitted model or the new fitted one.
     """
     import asyncio
-    X, y = await asyncio.to_thread(_get_training_data)
+    X, y, w = await asyncio.to_thread(_get_training_set)
     if len(X) < _MIN_TRAIN:
         return
-    model, backend, mean_r = await asyncio.to_thread(_fit_batch, X, y)
+    model, backend, mean_r = await asyncio.to_thread(_fit_batch, X, y, *([] if w is None else [w]))
     _install_batch(model, backend, len(X), mean_r)
 
 
@@ -588,7 +591,7 @@ def record_outcome(signal_id: int, outcome: str) -> None:
         return
     feats = feats + _vol.row_tail(sig, _vol.feature_enabled())
 
-    label = _realised_r(sig)
+    label = training_label(sig, executed_risk_for([sig]) if _learning_switches()[1] else None)
     if label is None:
         _log.debug("[RE-ML] signal=%s has no realised R (sl_dist/net_pnl missing) — "
                    "not used for training", signal_id)

@@ -314,4 +314,14 @@ _RECENT: list[tuple[int, str, object]] = [
     (61, "Reversal ML: volatility-regime feature (off)", [
         "ALTER TABLE vantage_risk_settings ADD COLUMN re_vol_regime_feature_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # How the two engines' ML models learn (docs/todo/017). All off: each
+    # model fits exactly as before until its switch is ticked, and each one
+    # changes which signals an ML gate passes once it is, so demo first.
+    (62, "ML learning: time-decay weights, executed labels, Breakout realised R (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_ml_time_decay_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN bo_ml_time_decay_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_ml_learn_from_executed INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN bo_ml_realised_r_label INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

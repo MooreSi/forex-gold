@@ -126,6 +126,52 @@ export const CAPABILITIES: Capability[] = [
       "See docs/todo/016.",
   },
   {
+    key: "re_ml_time_decay_enabled",
+    label: "Reversal ML remembers more than a few days",
+    description:
+      "Off, the Reversal model weights its training signals by how many " +
+      "came after them, so it forgets anything older than about four days " +
+      "(measured 2026-10-14: 5,431 signals counted like 118). On, a signal's " +
+      "weight halves every 14 days but never falls below a quarter, and " +
+      "signals that rode the same move share one vote. That lets it compare " +
+      "more than one kind of market. It changes which signals the ML gate " +
+      "lets through from the next retrain, so try it on the demo account " +
+      "first. See docs/todo/017.",
+  },
+  {
+    key: "re_ml_learn_from_executed",
+    label: "Reversal ML learns from real trades",
+    description:
+      "Off, the Reversal model never learns from a trade that was actually " +
+      "placed, because its result is in real-lot dollars. On, each closed " +
+      "executed trade is scored as the broker's net result over the risk " +
+      "the trade itself recorded at open, the same R scale as the virtual " +
+      "signals. Trades from before that risk was recorded stay out. It " +
+      "changes which signals the ML gate lets through, so try it on the " +
+      "demo account first. See docs/todo/017.",
+  },
+  {
+    key: "bo_ml_realised_r_label",
+    label: "Breakout ML learns what trades really made",
+    description:
+      "Off, the Breakout model is told every win made 1R and every loss " +
+      "lost 1R. On, it learns each trade's real result over its own risk, " +
+      "and it gives no opinion (the gate lets trades through) until it can " +
+      "rank the newest quarter of its trades better than chance. That can " +
+      "mean fewer blocked signals, not more. Try it on the demo account " +
+      "first. See docs/todo/017.",
+  },
+  {
+    key: "bo_ml_time_decay_enabled",
+    label: "Breakout ML weights by age, not by count",
+    description:
+      "The Breakout version of the switch above: weights halve every 14 " +
+      "days with a floor of a quarter, and overlapping trades share a vote, " +
+      "instead of a 40-trade half-life. It changes which signals the ML " +
+      "gate lets through, so try it on the demo account first. " +
+      "See docs/todo/017.",
+  },
+  {
     key: "re_require_proven_edge",
     label: "Trade only on a proven edge",
     description:

@@ -225,6 +225,29 @@ class TestTheConsolidatedLedger:
         assert strategies["222"] == "swing"
         assert directions["222"] == "SELL"
 
+    @pytest.mark.parametrize("main_first", [True, False])
+    def test_the_executed_trade_names_the_strategy_when_a_ticket_has_two_rows(
+            self, main_first):
+        """A live Reversal Engine trade closes into the ledger twice under one
+        ticket: the main engine's row for the order it placed, and the engine's
+        own signal row. Only the first knows the strategy the order ran under.
+
+        2026-10-15, ticket 2190411941: main row `template:Asian - Single`, RE
+        row `scale_out`, and the Mac's Trades page showed Scale Out because the
+        RE row happened to be written second. Both write orders must give the
+        executed trade's answer."""
+        main = _trade(trade_id="0ed6cc95", engine="main", mt5_ticket="2190411941",
+                      strategy="template:Asian - Single", tg_source="Reversal Engine")
+        re_row = _trade(trade_id="RE-471ED6", engine="reversal_engine",
+                        mt5_ticket="2190411941", strategy="scale_out",
+                        tg_source="Reversal Engine")
+        for row in ((main, re_row) if main_first else (re_row, main)):
+            repo.record_consolidated_trade("vps", row)
+
+        _, strategies, _ = repo.get_consolidated_ticket_maps()
+
+        assert strategies["2190411941"] == "template:Asian - Single"
+
 
 class TestStoodDownEngines:
     def test_it_is_empty_by_default(self):

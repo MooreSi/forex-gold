@@ -700,15 +700,15 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
     def _active_strategy(self) -> str:
         """The strategy actually selected for the the reference channel channel -- same one used to
         manage real the reference channel trades -- so RE's virtual outcomes are modelled on the
-        same SL/TP management rules, not an unrelated leftover default."""
+        same SL/TP management rules, not an unrelated leftover default.
+        Schedule window first, as the order's own resolver does (2026-10-15)."""
         try:
             from backend.src.db import database as core_db
-            from backend.src.utils.models import STRATEGY_SCALE_OUT
-            override = core_db.get_channel_strategy_override("Reversal Engine")
+            from backend.src.services.risk.schedule import effective_channel_strategy
+            override = effective_channel_strategy("Reversal Engine")
             if override and override != "auto":
                 return override
-            rs = core_db.get_risk_settings()
-            return rs.get("trade_strategy", STRATEGY_SCALE_OUT)
+            return core_db.get_risk_settings().get("trade_strategy", "scale_out")
         except Exception:
             return "scale_out"
 

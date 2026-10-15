@@ -151,12 +151,18 @@ def get_consolidated_ticket_maps() -> tuple[dict[str, str], dict[str, str], dict
     {mt5_ticket_str: direction}) from the consolidated ledger — i.e. from ALL
     paired nodes, not just this one. history.py merges this in as a fallback
     for tickets with no local vantage_simulated_trades row (trades the OTHER
-    node opened)."""
+    node opened).
+
+    A live Reversal Engine trade has two rows under one ticket: the main
+    engine's (the order it placed, with the strategy it really ran) and the
+    engine's own signal row. Later rows win the maps, so main rows are read
+    last. Unordered, the signal row's stamp overwrote the executed strategy
+    on the Trades page (2026-10-15, ticket 2190411941)."""
     _ensure_sync_tables()
     with db() as conn:
         rows = conn.execute(
             "SELECT mt5_ticket, tg_source, strategy, direction FROM consolidated_trades "
-            "WHERE mt5_ticket IS NOT NULL"
+            "WHERE mt5_ticket IS NOT NULL ORDER BY (engine = 'main'), id"
         ).fetchall()
     channel_map, strategy_map, direction_map = {}, {}, {}
     for mt5_ticket, tg_source, strategy, direction in rows:

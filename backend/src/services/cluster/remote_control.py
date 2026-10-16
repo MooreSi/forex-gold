@@ -53,7 +53,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "is_remote_active", "is_centralized_remote_mode", "where",
     "effective_settings", "engines_running", "set_engine_running", "set_ai_eval",
-    "place_market_order", "close_on_peer", "resume_trading_on_peer", "send_engine_action", "AI_EVAL_KEYS",
+    "place_market_order", "close_on_peer", "resume_trading_on_peer", "resume_trading_past_goal_on_peer",
+    "send_engine_action", "AI_EVAL_KEYS",
     "RemoteControlFailed",
 ]
 
@@ -267,7 +268,7 @@ async def close_on_peer(trade_id: str, reason: str) -> dict:
     return {**((ack or {}).get("result") or {}), "where": "remote"}
 
 
-async def resume_trading_on_peer() -> dict:
+async def resume_trading_on_peer(past_goal: bool = False) -> dict:
     """Lift the remote node's trading holds, on the remote node.
 
     The header's Resume, for a badge that reports the VPS: its breaker, pause
@@ -278,9 +279,12 @@ async def resume_trading_on_peer() -> dict:
 
     Unreachable: nothing was sent, so nothing resumed. Refused: the peer's
     reason. No answer: it may have resumed; the badge will say.
+
+    `past_goal`: the VPS's "Resume anyway (ignore today's goal)".
     """
+    extra = {"past_goal": True} if past_goal else {}
     try:
-        ack = await _client.get_instance().request_peer_resume_trading()
+        ack = await _client.get_instance().request_peer_resume_trading(**extra)
     except asyncio.TimeoutError as exc:
         log.warning("[remote_control] resume: no answer from the peer")
         raise RemoteControlFailed(
@@ -296,6 +300,11 @@ async def resume_trading_on_peer() -> dict:
     if (ack or {}).get("error"):
         raise RemoteControlFailed(f"The remote node refused: {ack['error']}")
     return {**((ack or {}).get("result") or {}), "where": "remote"}
+
+
+async def resume_trading_past_goal_on_peer() -> dict:
+    """The VPS's "Resume anyway (ignore today's goal)" (owner, 2026-10-16)."""
+    return await resume_trading_on_peer(past_goal=True)
 
 
 async def send_engine_action(engine: str, action: str) -> dict:

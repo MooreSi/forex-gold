@@ -62,3 +62,25 @@ async def resume_all_on_vps() -> dict:
         **out,
         "note": "The daily profit target, if cleared, is lifted for today only.",
     }
+
+
+@router.post("/resume-past-goal")
+async def resume_past_goal() -> dict:
+    """"Resume anyway (ignore today's goal)" (owner, 2026-10-16).
+
+    `/resume-all`, lifting a reached daily goal's halt too, and keeping the
+    goal from halting again until midnight on the trading clock. A route of
+    its own so a plain Resume can never become this one by a missing field.
+    """
+    out = status_ctl.resume_trading_past_goal()
+    return {**out, "note": "Today's daily goal is ignored until midnight."}
+
+
+@router.post("/remote/resume-past-goal")
+async def resume_past_goal_on_vps() -> dict:
+    """The same override for a badge that reports the VPS. Never local."""
+    try:
+        out = await status_ctl.resume_trading_past_goal_on_vps()
+    except status_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc)) from exc
+    return {**out, "note": "Today's daily goal is ignored until midnight."}

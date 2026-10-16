@@ -22,8 +22,10 @@ October the goal was secured at 05:46, a Resume at 07:30 lifted it and
 restarted its count, and the day finished at -$39.28. Resume no longer lifts
 this goal's halt (`manual_pause.resume` asks `keeps_its_halt`) and the goal
 always counts the whole day, so neither a Resume nor a restart can reset it.
-The deliberate override is the goal's own setting: switched off, or raised
-above the day, and the next sweep lifts its halt (`sweep`, `lift_hold`).
+The deliberate overrides are the goal's own setting (switched off, or raised
+above the day, and the next sweep lifts its halt: `sweep`, `lift_hold`) and
+the status dialog's "Resume anyway (ignore today's goal)" (owner, 2026-10-16):
+`override_for_today` stops the goal halting, or standing, until the day ends.
 
 **Where it runs.** The other two daily halts are evaluated inside
 `record_close`, which is the frozen close path; this one is not allowed there.
@@ -56,7 +58,7 @@ from backend.src.services.risk import settings as _risk
 log = logging.getLogger(__name__)
 
 __all__ = ["sweep", "SweepState", "progress", "header_progress", "goal_standing",
-           "broker_realised", "keeps_its_halt"]
+           "broker_realised", "keeps_its_halt", "override_for_today"]
 
 # How often the monitor cycle may evaluate the goal. The cycle itself runs
 # every 1-5s; the goal reads the day's closes and, in % mode, the account
@@ -161,6 +163,31 @@ async def header_progress(engine: Any, balance: Optional[float],
         return None
 
 
+# Until when "Resume anyway (ignore today's goal)" keeps the goal from
+# halting: the end of the goal's day, so it lapses on its own at midnight.
+OVERRIDE_KEY = "daily_goal_overridden_until"
+
+
+def override_for_today() -> float:
+    """Ignore today's goal until the day ends. Returns when it lapses.
+
+    Written before the halt is lifted, so the next sweep cannot re-secure the
+    day in between (owner, 2026-10-16)."""
+    until = _goal_day_start() + 86400.0
+    db_module.set_app_config(OVERRIDE_KEY, str(until))
+    log.warning("[RG] daily goal overridden by hand until the day ends")
+    return until
+
+
+def _overridden() -> bool:
+    """Is today's goal being ignored by hand? Unreadable reads as no: the goal
+    then halts, which is the direction that cannot cost money."""
+    try:
+        return float(db_module.get_app_config(OVERRIDE_KEY) or 0) > time.time()
+    except (TypeError, ValueError):
+        return False
+
+
 HOLD_PREFIX = "Daily goal reached"
 SECURED_PREFIX = "Daily goal secured"
 
@@ -197,7 +224,7 @@ def apply_daily_goal(rs: dict, balance: Optional[float],
     is the one the operator needs to read.
     """
     reason = check_daily_goal(rs, balance, realised, day_realised)
-    if not reason:
+    if not reason or _overridden():
         return False
     if _gov.is_trading_paused() and not _holding():
         return False
@@ -229,7 +256,7 @@ def goal_standing(rs: dict, balance: Optional[float],
     loss took the day back under the goal: the trades it waits for are the
     ones still able to take it further under.
     """
-    if not bool(int(rs.get("daily_goal_enabled", 0) or 0)):
+    if not bool(int(rs.get("daily_goal_enabled", 0) or 0)) or _overridden():
         return False
     return _holding() or check_daily_goal(rs, balance, realised,
                                           day_realised) is not None
@@ -296,7 +323,7 @@ def keeps_its_halt() -> Optional[str]:
     Resume that lifted it restarted nothing the next sweep could not undo, and
     on 9 October it let a secured day trade on to -$39.28 (owner, 2026-10-10).
     """
-    if not _own_halt():
+    if not _own_halt() or _overridden():
         return None
     try:
         enabled = bool(int(_risk.get().get("daily_goal_enabled", 0) or 0))

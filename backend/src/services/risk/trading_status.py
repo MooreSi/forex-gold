@@ -211,6 +211,9 @@ def _as_the_vps_reports_it(view: dict) -> dict:
         # clear the Mac's holds, which guard no orders. This one is sent to
         # the VPS (`remote_control.resume_trading_on_peer`).
         "can_resume_on_vps": bool(remote.get("can_resume")),
+        # Its "Resume anyway (ignore today's goal)". An older VPS does not
+        # send it, so it is not offered there.
+        "can_resume_past_goal_on_vps": bool(remote.get("can_resume_past_goal")),
         "node": "vps",
     }
 
@@ -303,6 +306,9 @@ def badge() -> dict:
             "label": halt_label(until, only_goal),
             "detail": " / ".join(r for r in reasons if r),
             "until": until, "resume_ts": None, "can_resume": not goal_kept,
+            # The explicitly worded override (owner, 2026-10-16), offered only
+            # over the goal's own halt: `manual_pause.resume_past_goal`.
+            "can_resume_past_goal": goal_kept,
         }
 
     target = _safe(_daily_target_state, {"reached": False})
@@ -369,7 +375,12 @@ def header_pause() -> dict:
             "source": "VPS"}
 
 
-def resume_all() -> dict:
+def resume_all_past_goal() -> dict:
+    """"Resume anyway (ignore today's goal)": `resume_all(past_goal=True)`."""
+    return resume_all(past_goal=True)
+
+
+def resume_all(past_goal: bool = False) -> dict:
     """Clear whichever of the three holds is actually in force.
 
     Mirrors the NiceGUI Resume dialog, and mirrors it deliberately: the badge
@@ -385,6 +396,11 @@ def resume_all() -> dict:
     The daily target is lifted for TODAY only; that is what the service does
     and the response says so. Per-window targets and the window hours are
     separate gates and are left alone.
+
+    `past_goal` is the dialog's "Resume anyway (ignore today's goal)": the
+    goal's own halt is lifted too, and the goal ignored until the day ends
+    (`manual_pause.resume_past_goal`, owner 2026-10-16). Without it a reached
+    goal's halt stays and the reply says so in `kept`.
 
     Returns what was actually cleared, so the caller can say so rather than
     claiming a blanket "resumed".
@@ -403,7 +419,8 @@ def resume_all() -> dict:
     try:
         if _trade_pause_until() > time.time():
             from backend.src.services.risk import manual_pause
-            kept = manual_pause.resume()
+            kept = (manual_pause.resume_past_goal() if past_goal
+                    else manual_pause.resume())
             if not kept:
                 cleared.append("manual_pause")
     except Exception as exc:

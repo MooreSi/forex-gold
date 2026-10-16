@@ -470,6 +470,23 @@ only, every source.
     lifts its halt (`release_when_off`, needs the balance, re-runs the guards
     the halt masked, never another guard's halt); raised above the day,
     `lift_hold` lifts it when flat, as before.
+  - **"Resume anyway (ignore today's goal)" (2026-10-16, owner).** A second,
+    explicitly worded button in the status dialog, Mac and VPS, offered only
+    when the badge says the halt is the goal's (`can_resume_past_goal`, or
+    `can_resume_past_goal_on_vps` from a VPS that sends it). It posts to its
+    own route (`/api/trading/resume-past-goal`, `/remote/resume-past-goal`;
+    the VPS gets `past_goal: true` on `MSG_RESUME_TRADING`) and runs
+    `manual_pause.resume_past_goal`: writes `daily_goal_overridden_until`
+    (the goal's day end) BEFORE clearing the pause, so the next sweep cannot
+    re-secure in between. While it stands, `apply_daily_goal` writes no halt
+    or hold and `goal_standing` is false, so the breakeven sweep stops moving
+    new trades' stops (stops it already moved stay). It lapses at midnight on
+    its own. Plain Resume, `/resume` and the bot panel are unchanged. Over
+    another guard's halt it is a plain Resume and writes no override. An
+    older VPS ignores the flag and keeps the goal. Pinned by
+    `tests/risk/test_daily_goal_resume_anyway.py`,
+    `tests/core/test_resume_vps_past_goal_over_sync.py`. **Not yet run on a
+    demo account.**
   - The header's Today's Goal (`todays_realised.realised_on`) and every
     closed-trade row's new `day` field file a close by
     `formatting.broker_ts_to_local_date`; the Calendar files by `row.day`.

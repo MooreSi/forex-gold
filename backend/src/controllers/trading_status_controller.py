@@ -10,6 +10,7 @@ from backend.src.services.cluster import remote_control as _remote
 from backend.src.services.risk import trading_status as _status
 
 __all__ = ["trading_status_badge", "resume_trading_all", "resume_trading_on_vps",
+           "resume_trading_past_goal", "resume_trading_past_goal_on_vps",
            "RemoteControlFailed"]
 
 RemoteControlFailed = _remote.RemoteControlFailed
@@ -43,3 +44,14 @@ async def resume_trading_on_vps() -> dict:
     holds guard no orders.
     """
     return await _remote.resume_trading_on_peer()
+
+
+def resume_trading_past_goal() -> dict:
+    """"Resume anyway (ignore today's goal)": the same Resume, lifting a
+    reached daily goal's halt for the rest of today as well."""
+    return _status.resume_all_past_goal()
+
+
+async def resume_trading_past_goal_on_vps() -> dict:
+    """The same override, run by the VPS against its own goal."""
+    return await _remote.resume_trading_past_goal_on_peer()

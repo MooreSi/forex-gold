@@ -19,7 +19,16 @@ export interface TradingStatus {
   /** The VPS's own `can_resume`. When true the dialog offers Resume, sent to
    *  the VPS (`/api/trading/remote/resume-all`), never to this node. */
   can_resume_on_vps?: boolean;
+  /** The halt is a reached daily goal's, which plain Resume leaves in place
+   *  (owner, 2026-10-10). Offers "Resume anyway (ignore today's goal)",
+   *  which lifts it until midnight (owner, 2026-10-16). */
+  can_resume_past_goal?: boolean;
+  /** The VPS's own `can_resume_past_goal`; the override is sent to it. */
+  can_resume_past_goal_on_vps?: boolean;
 }
+
+/** The override's wording. Spelled out so it is never mistaken for Resume. */
+const RESUME_ANYWAY = "Resume anyway (ignore today's goal)";
 
 interface TradingStatusDialogProps {
   open: boolean;
@@ -111,8 +120,17 @@ export function TradingStatusDialog({
           {error && <p role="alert" className="text-xs text-loss">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              {status.can_resume_on_vps ? "Cancel" : "Close"}
+              {status.can_resume_on_vps || status.can_resume_past_goal_on_vps
+                ? "Cancel" : "Close"}
             </Button>
+            {status.can_resume_past_goal_on_vps && (
+              <Button
+                disabled={busy}
+                onClick={() => void submit(() => api.post("/api/trading/remote/resume-past-goal"))}
+              >
+                {busy ? "Resuming…" : RESUME_ANYWAY}
+              </Button>
+            )}
             {status.can_resume_on_vps && (
               <Button
                 disabled={busy}
@@ -129,15 +147,32 @@ export function TradingStatusDialog({
 
   // Halted with nothing a Resume would lift: a reached daily goal (owner,
   // 2026-10-10). The detail says what does lift it. A Pause form here would
-  // write a shorter pause over the goal's.
+  // write a shorter pause over the goal's. The one way past it from here is
+  // the explicitly worded override (owner, 2026-10-16), when the backend says
+  // the halt is the goal's.
   if (status.state === "halted" && !status.can_resume) {
     return (
       <DialogShell open={open} onOpenChange={onOpenChange} title="Trading paused">
         <div data-testid="trading-status-dialog" className="space-y-3 text-xs text-ink-2">
           <p className="font-semibold text-ink-1">{status.label}</p>
           {status.detail && <p>{status.detail}</p>}
+          {status.can_resume_past_goal && (
+            <p className="text-ink-3">
+              {RESUME_ANYWAY} lifts the goal's pause and stops the goal pausing
+              trading again until midnight. Tomorrow it counts as normal.
+            </p>
+          )}
+          {error && <p role="alert" className="text-xs text-loss">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
+            {status.can_resume_past_goal && (
+              <Button
+                disabled={busy}
+                onClick={() => void submit(() => api.post("/api/trading/resume-past-goal"))}
+              >
+                {busy ? "Resuming…" : RESUME_ANYWAY}
+              </Button>
+            )}
           </div>
         </div>
       </DialogShell>

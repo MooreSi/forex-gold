@@ -32,7 +32,8 @@ from backend.src.services.risk import governor as _governor
 
 log = logging.getLogger(__name__)
 
-__all__ = ["pause", "pause_until", "resume", "state", "PAUSE_KEY", "GOAL_KEPT"]
+__all__ = ["pause", "pause_until", "resume", "resume_past_goal", "state",
+           "PAUSE_KEY", "GOAL_KEPT"]
 
 PAUSE_KEY = "trade_pause_until"
 
@@ -107,6 +108,24 @@ def resume() -> str | None:
                     "re-armed (%s) — a give-back halt may re-trip on the next "
                     "close", exc)
     return None
+
+
+def resume_past_goal() -> None:
+    """"Resume anyway (ignore today's goal)": `resume`, lifting the goal's own
+    halt too (owner, 2026-10-16).
+
+    Only when that halt is the goal's does it also stop the goal halting again
+    until the day ends (`daily_goal.override_for_today`), which is also what
+    lets `resume` past `keeps_its_halt` below. Over another guard's
+    halt it is a plain Resume and sets nothing, so a goal reached later today
+    still halts. Plain `resume` is unchanged: the 2026-10-10 rule stands for
+    every surface that has not asked for this by name.
+    """
+    from backend.src.services.risk import daily_goal as _goal
+    if _goal.keeps_its_halt():
+        _goal.override_for_today()
+        log.warning("[pause] Resume anyway: the daily goal's halt lifted for today")
+    resume()
 
 
 # What every Resume surface says when the goal's halt stays.

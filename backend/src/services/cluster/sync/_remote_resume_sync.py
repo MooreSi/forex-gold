@@ -29,8 +29,13 @@ log = logging.getLogger(__name__)
 
 
 class ClientRemoteResumeMixin:
-    async def request_peer_resume_trading(self, timeout: float = 20.0) -> dict:
+    async def request_peer_resume_trading(self, timeout: float = 20.0,
+                                          past_goal: bool = False) -> dict:
         """Ask the VPS to lift its holds. Returns its ack: {"result"} or {"error"}.
+
+        `past_goal` is "Resume anyway (ignore today's goal)". Sent only when
+        set, so a plain Resume is the same message it always was; a VPS on
+        older code ignores it and keeps the goal (its reply says `kept`).
 
         Raises ConnectionError with no link (nothing was sent), and
         asyncio.TimeoutError when the VPS never answers (it may have resumed)."""
@@ -40,8 +45,10 @@ class ClientRemoteResumeMixin:
         waiting = self.__dict__.setdefault("_resume_trading_acks", {})
         fut = asyncio.get_running_loop().create_future()
         waiting[req_id] = fut
+        extra = {"past_goal": True} if past_goal else {}
         try:
-            await self._ws.send(json.dumps(make(MSG_RESUME_TRADING, req_id=req_id)))
+            await self._ws.send(json.dumps(make(MSG_RESUME_TRADING, req_id=req_id,
+                                                **extra)))
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             waiting.pop(req_id, None)
@@ -56,7 +63,9 @@ class ServerRemoteResumeMixin:
     async def _handle_resume_trading(self, ws, msg: dict) -> None:
         from backend.src.services.risk import trading_status
         try:
-            reply = {"result": await db_module.to_db_thread(trading_status.resume_all)}
+            kwargs = {"past_goal": True} if msg.get("past_goal") is True else {}
+            reply = {"result": await db_module.to_db_thread(
+                lambda: trading_status.resume_all(**kwargs))}
         except Exception as e:
             log.warning("[SyncServer] resume requested by the Mac failed: %s", e)
             reply = {"error": str(e)}

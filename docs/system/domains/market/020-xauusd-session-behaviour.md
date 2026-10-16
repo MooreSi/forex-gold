@@ -220,6 +220,17 @@ That is a change to `monitor_cycle`, not to a template.
 - The extension asymmetry favouring longs (gold's 2018-2026 bull trend) is
   present in every session and strongest in NY. It is a drift, not a structure,
   and nothing should be built on it without a bear-market sample to test against.
+  **Tested 2026-10-14 for the Asian session, Fridays and the 200-day average
+  ([spec 018](../../../todo/018-asian-drift-friday-and-the-200-day-filter.md),
+  Dukascopy 2003-05 to 2025, bear window 2013-2015 included).** Gold does
+  drift up in 00-07 UTC: +0.361 points a session before costs, t +4.0 over
+  5,866 sessions, matching the published +0.029%. That is 63% of one round
+  trip's measured cost (0.575), so it loses after cost (-0.214, t -2.4,
+  positive in 5 of 23 years), and as a filter it is ~1% of a 20-40 point stop.
+  Friday's drift is noise after cost (t +0.6). A one-day hold in the direction
+  of the 200-day average loses (t -0.9), and using the 200-day as permission
+  makes the Asian drift worse. Do not build a session-direction bias on any
+  of the three.
 
 ---
 

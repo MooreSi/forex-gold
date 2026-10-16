@@ -66,6 +66,13 @@
       "reason": "The 2025 edge trials (docs/todo/reversal-engine/270). Pure: bars in, trades and verdicts out. Imported only by tools/edge_trials_2025.py and tools/edge_holdout.py, which are research scripts and not app entrypoints. Pinned by tests/backtest/test_edge_trials.py. Delete this entry if it is wired or removed."
     },
     {
+      "module": "backend.src.services.backtest.drift_trials",
+      "file": "backend/src/services/backtest/drift_trials.py",
+      "loc": 205,
+      "class": "unwired-tool",
+      "reason": "The session-drift trials (docs/todo/018): Asian-hours, Friday and 200-day direction on Dukascopy daily candles. Pure: bars in, trades and verdicts out. Imported only by tools/drift_trials.py, a research script and not an app entrypoint. Pinned by tests/backtest/test_drift_trials.py. Delete this entry if it is wired or removed."
+    },
+    {
       "module": "backend.src.services.reversal_engine.historical_bars",
       "file": "backend/src/services/reversal_engine/historical_bars.py",
       "loc": 242,

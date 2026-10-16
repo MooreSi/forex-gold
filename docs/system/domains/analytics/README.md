@@ -63,6 +63,8 @@ email + Telegram notification config.
 
 - **The Analysis trade table's Spread and Cost come from `trade_spread_cache`, and only `analytics/entry_spread.py` writes it (2026-09-29).** The NiceGUI History page looked up each uncached ticket's entry tick on refresh; the React port kept the read and dropped the write, so every trade from 2026-09-21 showed no spread and a zero cost (306 of 750 rows in the 30-day window). Restored inside `trade_table.closed_trades`, through the facade's existing `get_ticks_range` (first tick in the minute from the entry, which is what the bridge's `/tick_at` returns) rather than a new `get_tick_at` facade method. At most 40 lookups per read, newest first, so a cold cache fills over a few polls instead of stalling one. The table polls every 15s (was 60s, "really slow to update"). Pinned by `tests/services/analytics/test_entry_spread_backfill.py`.
 
+- **An all-winners window has no profit factor, and `compute_mt5_performance` still returns 0.0 for it (2026-10-16).** That 0.0 is pinned by `tests/core/test_mt5_history_characterization.py`, so it stays; the payload adds `no_losses` (winners and no losers), and the dashboard and History Performance cards and the weekly email print "No losses" from it instead of a red 0.00. The daily email computes today's figure itself and now says "No losses" too (it used to divide by $0.01 and print thousands). 0.00 remains for a window with no winners. The AI prompt (`claude_ai.py`) still prints 0.00 for an all-winners window. Pinned by `tests/core/test_mt5_performance_no_losses.py`.
+
 ## The ORB's auto-execute, measured (2026-10-01)
 
 Owner: ORB "maybe one or two" setups. Replayed on the bridge's own gold

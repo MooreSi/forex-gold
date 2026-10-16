@@ -33,6 +33,9 @@ export function PerformanceCard({ performance, range, onWindow }: {
 }) {
   const pnl = num(performance, "total_net_pnl");
   const factor = num(performance, "profit_factor");
+  // Winners and no losers: no finite factor, and the backend's 0 for it would
+  // print as a red 0.00 (owner, 2026-10-16).
+  const noLosses = performance.no_losses === true;
 
   return (
     <DashCard
@@ -78,9 +81,9 @@ export function PerformanceCard({ performance, range, onWindow }: {
               value={formatPercent(num(performance, "win_rate_pct"))} />
             <Reading
               label="Profit factor"
-              value={factor == null ? "—" : factor.toFixed(2)}
-              hint="Gross profit divided by gross loss. Above 1.0 is profitable overall."
-              tone={factor == null ? undefined
+              value={noLosses ? "No losses" : factor == null ? "—" : factor.toFixed(2)}
+              hint="Gross profit divided by gross loss. Above 1.0 is profitable overall. No losses means every closed trade in this window won."
+              tone={noLosses ? "text-profit" : factor == null ? undefined
                 : factor >= 1 ? "text-profit" : "text-loss"}
             />
             <Reading

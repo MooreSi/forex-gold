@@ -191,6 +191,10 @@ async def compute_mt5_performance(bridge: Any, days: int = 90,
             "open_trades":        len(open_positions),
             "win_rate_pct":       round(win_rate, 2),
             "profit_factor":      round(pf, 4),
+            # Winners and no losers: the factor has no finite value and is
+            # 0.0 above (pinned). Screens print "No losses" from this instead
+            # of a red 0.00 (owner, 2026-10-16).
+            "no_losses":          bool(winners) and not losers,
             "total_net_pnl":      round(sum(trades_pnl), 4),
             "best_trade":         round(max(trades_pnl), 4) if trades_pnl else 0.0,
             "worst_trade":        round(min(trades_pnl), 4) if trades_pnl else 0.0,

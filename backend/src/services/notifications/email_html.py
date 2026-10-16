@@ -242,10 +242,12 @@ def build_daily_html(
     open_ct   = int(perf.get("open_trades", 0) or 0)
     closed_ct = len(closed_today)
 
-    # Profit factor from today's closed trades only
+    # Profit factor from today's closed trades only. Winners and no losers
+    # has no finite figure: "No losses", not wins / $0.01 (owner, 2026-10-16).
     _day_wins   = sum(float(t.get("net_pnl") or 0) for t in closed_today if float(t.get("net_pnl") or 0) > 0)
     _day_losses = abs(sum(float(t.get("net_pnl") or 0) for t in closed_today if float(t.get("net_pnl") or 0) < 0))
-    pf = round(_day_wins / max(_day_losses, 0.01), 2) if closed_today else 0.0
+    pf_str = ("No losses" if _day_wins > 0 and _day_losses == 0
+              else f"{(_day_wins / _day_losses if _day_losses else 0.0):.2f}")
 
     pnl_color = _pnl_color(daily_pnl)
     pnl_str   = _fmt(daily_pnl)
@@ -287,7 +289,7 @@ def build_daily_html(
   <tr><td style="background:{_BG};padding:8px 16px;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
       {_stat_cell("WIN RATE",     f"{win_rate:.1f}%",    _GREEN)}
-      {_stat_cell("PROFIT FACTOR", f"{pf:.2f}")}
+      {_stat_cell("PROFIT FACTOR", pf_str)}
       {_stat_cell("OPEN TRADES",  str(open_ct))}
       {_stat_cell("TOTAL CLOSED", str(closed_ct))}
     </tr></table>
@@ -342,6 +344,7 @@ def build_weekly_html(
     total_pnl   = float(perf.get("total_net_pnl", 0) or 0)
     win_rate    = float(perf.get("win_rate_pct", 0) or 0)
     pf          = float(perf.get("profit_factor", 0) or 0)
+    pf_str      = "No losses" if perf.get("no_losses") else f"{pf:.2f}"
     best        = float(perf.get("best_trade", 0) or 0)
     worst       = float(perf.get("worst_trade", 0) or 0)
     max_dd      = float(perf.get("max_drawdown_pct", 0) or 0)
@@ -390,7 +393,7 @@ def build_weekly_html(
   <tr><td style="background:{_BG};padding:8px 16px;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
       {_stat_cell("WIN RATE",     f"{win_rate:.1f}%", _GREEN)}
-      {_stat_cell("PROFIT FACTOR", f"{pf:.2f}")}
+      {_stat_cell("PROFIT FACTOR", pf_str)}
       {_stat_cell("BEST TRADE",   _fmt(best),  _GREEN)}
       {_stat_cell("WORST TRADE",  _fmt(worst), _pnl_color(worst))}
       <td style="padding:12px 8px;text-align:center;">

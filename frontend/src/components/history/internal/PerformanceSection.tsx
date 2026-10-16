@@ -33,8 +33,10 @@ export function PerformanceSection({ performance }: { performance: Record<string
       <StatCard label="Win rate" value={formatPercent(num(performance, "win_rate_pct"))} />
       <StatCard
         label="Profit factor"
-        value={(num(performance, "profit_factor") ?? 0).toFixed(2)}
-        hint="Gross profit divided by gross loss. Above 1.0 is profitable overall."
+        value={performance.no_losses === true
+          ? "No losses"
+          : (num(performance, "profit_factor") ?? 0).toFixed(2)}
+        hint="Gross profit divided by gross loss. Above 1.0 is profitable overall. No losses means every closed trade in this window won."
       />
       <StatCard
         label="Max drawdown"

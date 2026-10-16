@@ -242,7 +242,7 @@ async def closed_trades(engine: Any, days: int, today: bool = False) -> dict:
             "duration_secs": (close_ts - open_ts) if open_ts and close_ts else None,
             "order_type": "Limit" if kind == "limit" else "Market",
             "pending_secs": (open_ts - pending_at) if pending_at and open_ts else None,
-            "reason": _labels.parse_reason(close_deal.get("comment") or "", pnl),
+            "reason": _labels.close_reason(closes, pnl),
             # Which market was open when it closed. The calendar's day view
             # totals by this as well as by signal source -- asked for on
             # 2026-09-22, and the question the Asian-hours losses raised.

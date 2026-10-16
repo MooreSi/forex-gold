@@ -954,6 +954,8 @@ def _get_history_by_position(position_id: int) -> list[dict] | None:
                 "time_msc":    getattr(d, "time_msc", None),
                 "time":        d.time,
                 "comment":     d.comment,
+                # DEAL_REASON: 3 = an expert (the EA), 0/1/2 = a terminal.
+                "reason":      getattr(d, "reason", None),
             })
         return result
     except Exception as e:
@@ -999,6 +1001,8 @@ def _get_history(days: int, flush: bool = False) -> list[dict] | None:
                 "time_msc":    getattr(d, "time_msc", None),
                 "time":        d.time,
                 "comment":     d.comment,
+                # DEAL_REASON: 3 = an expert (the EA), 0/1/2 = a terminal.
+                "reason":      getattr(d, "reason", None),
             })
         return result
     except Exception as e:

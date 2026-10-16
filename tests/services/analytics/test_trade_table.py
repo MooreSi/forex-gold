@@ -168,6 +168,19 @@ class TestAPartialCloseIsSeveralDeals:
         assert row["exit_price"] == 2415.0
         assert row["close_ts"] == 1_750_002_000.0
 
+    async def test_an_ea_ladder_is_labelled_from_all_its_exits(self, maps):
+        """Two blank-comment expert exits are the EA working its TP ladder,
+        which the last deal alone cannot show (2026-10-16)."""
+        engine = _Engine([
+            _deal(volume=0.03),
+            _deal(entry=1, type=1, volume=0.02, time=1_750_001_000.0, reason=3),
+            _deal(entry=1, type=1, volume=0.01, time=1_750_002_000.0, reason=3),
+        ])
+
+        row = (await trade_table.closed_trades(engine, 30))["rows"][0]
+
+        assert row["reason"] == "EA TP"
+
 
 class TestTheNumbers:
     async def test_pips_follow_the_direction(self, maps):

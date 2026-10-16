@@ -11,7 +11,7 @@ from __future__ import annotations
 from backend.src.utils.models import STRATEGY_NAMES
 
 __all__ = [
-    "STRATEGY_LABELS", "parse_reason", "strategy_display_label",
+    "STRATEGY_LABELS", "close_reason", "parse_reason", "strategy_display_label",
     "trade_source_label", "trade_channel_label",
 ]
 
@@ -50,6 +50,33 @@ def parse_reason(comment: str, pnl: float = 0.0) -> str:
         return "Partial TP"
     # Anything left -- return cleaned-up original
     return comment.strip() or ("Win" if pnl > 0 else "Loss")
+
+
+# MT5 DEAL_REASON values a blank comment can be read from.
+_DEAL_REASON_EXPERT = 3
+_DEAL_REASON_LABELS = {4: "SL", 5: "TP", 6: "Stop-out"}
+
+
+def close_reason(closes: list[dict], pnl: float = 0.0) -> str:
+    """Label a position from its close deals, the last one deciding.
+
+    A comment is read by `parse_reason`, as before. A BLANK comment used to be
+    "Manual" whoever closed it, but the EA's own partial and final TP closes
+    leave it blank too (2026-10-16: 72 of 459 Reversal Engine template trades).
+    MT5's DEAL_REASON, when the bridge sends it, separates them: an expert
+    finishing a ladder of closes is "EA TP", an expert closing in one deal is
+    "EA close" (a harvest, a close-all or a final level with partials off; the
+    deal does not say which). With no `reason` the label is unchanged.
+    """
+    last = max(closes, key=lambda d: d.get("time", 0))
+    comment = (last.get("comment") or "").strip()
+    reason = last.get("reason")
+    if not comment and reason is not None:
+        if reason == _DEAL_REASON_EXPERT:
+            return "EA TP" if len(closes) > 1 else "EA close"
+        if reason in _DEAL_REASON_LABELS:
+            return _DEAL_REASON_LABELS[reason]
+    return parse_reason(comment, pnl)
 
 
 def strategy_display_label(strategy: str) -> str:

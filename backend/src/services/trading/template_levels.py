@@ -29,6 +29,8 @@ import time
 from typing import Any, Optional
 
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
+from backend.src.services.market import vol_forecast
+from backend.src.services.trading import round_levels
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ class PriceRef:
 # (handover 031, 2026-10-07). Cached briefly so one trade's stop, lot and
 # targets are all sized from the same figure.
 _ATR_TTL_S = 30.0
-_atr_cache: dict[int, tuple[float, float]] = {}
+_atr_cache: dict[tuple, tuple[float, float]] = {}
 
 
 def reset_atr_cache() -> None:
@@ -77,7 +79,9 @@ async def template_atr(template: Optional[dict], bridge: Any) -> Optional[float]
     if not template or not bool(template.get("use_dynamic_atr")) or bridge is None:
         return None
     period = int(template.get("atr_period") or 14)
-    hit = _atr_cache.get(period)
+    forecast = vol_forecast.enabled()
+    key = (period, forecast)
+    hit = _atr_cache.get(key)
     now = time.monotonic()
     if hit is not None and now - hit[1] < _ATR_TTL_S:
         return hit[0]
@@ -92,8 +96,23 @@ async def template_atr(template: Optional[dict], bridge: Any) -> Optional[float]
         return None
     if atr <= 0:
         return None
-    _atr_cache[period] = (atr, now)
+    if forecast:
+        atr = await _forecast_or(atr, bridge)
+    _atr_cache[key] = (atr, now)
     return atr
+
+
+async def _forecast_or(m5_atr: float, bridge: Any) -> float:
+    """docs/todo/019 B: the HAR forecast from closed H1 bars in M5 units,
+    or `m5_atr` unchanged when it cannot be made. Never raises."""
+    try:
+        h1 = (await bridge.get_candles("H1", vol_forecast.FIT_BARS + 1))[:-1]
+        m5 = (await bridge.get_candles("M5", vol_forecast.SCALE_H * 12 + 1))[:-1]
+        f = vol_forecast.forecast_atr(h1, m5, m5_atr) if h1 and m5 else None
+    except Exception as e:                              # noqa: BLE001
+        log.debug("[Template] volatility forecast failed: %s", e)
+        return m5_atr
+    return f if f else m5_atr
 
 
 def template_sl_at(template: Optional[dict], direction: str, ref_px: float,
@@ -126,7 +145,23 @@ def template_sl_at(template: Optional[dict], direction: str, ref_px: float,
     if dist is None:
         return None
     up = direction.upper() == "BUY"
-    return round(ref_px - dist if up else ref_px + dist, 2)
+    sl = round(ref_px - dist if up else ref_px + dist, 2)
+    # docs/todo/019 A, off by default. Here, not at a caller, so the stop a
+    # trade is SIZED from (resolution.py) and the one it is SENT with match.
+    if round_levels.enabled():
+        sl = round_levels.adjust_sl(sl, ref_px, up)
+    return sl
+
+
+def template_ladder(template: Optional[dict], atr: float, ref: float,
+                    sign: int, tps: dict) -> dict:
+    """The anchor ladder from the template's pips columns: ATR-scaled
+    (`atr_scaled_ladder`), then pulled before round numbers when
+    `round_number_exits_enabled` is on (docs/todo/019 A). The one call
+    `resolve_template_tps` makes for a template-driven ladder; a ladder taken
+    from a Telegram message never comes here."""
+    return round_levels.adjust_ladder(atr_scaled_ladder(template, atr, ref, sign, tps),
+                                      ref, sign)
 
 
 def atr_scaled_ladder(template: Optional[dict], atr: float, ref: float,

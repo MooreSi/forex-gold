@@ -72,6 +72,22 @@ export const RISK_GROUPS: RiskGroup[] = [
     ],
   },
   {
+    title: "Where a template's stop and targets land",
+    blurb: "EA template trades only. A Telegram signal's own prices are never moved. Both are off by default and both move real stops: try them on demo first.",
+    fields: [
+      {
+        key: "round_number_exits_enabled", kind: "toggle",
+        label: "Keep stops and targets off round numbers",
+        hint: "A target within $1 past a $5 level comes back to $0.30 before it; a stop within $1 beyond one moves to $1.30 beyond it (only ever further away, so the lot gets smaller). Untested on gold.",
+      },
+      {
+        key: "vol_forecast_stops_enabled", kind: "toggle",
+        label: "Size dynamic-ATR stops from a volatility forecast",
+        hint: "Templates with dynamic ATR use a forecast from hourly bars instead of the last 20 five-minute bars, held between half and double the five-minute figure. Changes stop width and lot size. Past measurement found the two give nearly the same results.",
+      },
+    ],
+  },
+  {
     title: "Stopping for the day",
     blurb:
       "Both of the first two measure from the day's OPENING balance. The give-back guard is the one that can see a day which goes well and then does not. The daily goal stops the day once its profit is secured.",

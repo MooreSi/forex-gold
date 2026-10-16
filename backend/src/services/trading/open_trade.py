@@ -198,7 +198,7 @@ def resolve_template_tps(template: dict, direction: str, tick: Any,
         # documented scope), or the whole ladder rescaled around it when
         # atr_ladder_scale is on (2026-09-11). Both in one place because
         # they are one decision: see template_levels.atr_scaled_ladder.
-        tps = template_levels.atr_scaled_ladder(template, atr or 0.0, ref, sign, tps)
+        tps = template_levels.template_ladder(template, atr or 0.0, ref, sign, tps)
 
     pcts = None
     if tps:

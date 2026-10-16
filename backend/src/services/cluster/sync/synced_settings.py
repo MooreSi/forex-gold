@@ -187,4 +187,7 @@ SYNCED_SETTINGS_KEYS = (
     "contradiction_review_enabled",
     # Auto's H1 regime (migration 60): Auto picks on whichever node trades.
     "auto_template_h1_regime_enabled",
+    # Where a template's stop and targets land (migration 63): they act on
+    # whichever node trades.
+    "round_number_exits_enabled", "vol_forecast_stops_enabled",
 )

@@ -324,4 +324,13 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN re_ml_learn_from_executed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN bo_ml_realised_r_label INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Risk > Where a template's stop and targets land (docs/todo/019, owner
+    # 2026-10-16). Both off: every template stop, target and lot is exactly
+    # what it was until a switch is ticked, and each one moves real stops
+    # (the second also lot size) once it is, so demo first.
+    (63, "Template exits: round-number levels and forecast-volatility stops (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN round_number_exits_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN vol_forecast_stops_enabled INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

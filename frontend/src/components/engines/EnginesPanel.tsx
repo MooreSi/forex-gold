@@ -89,6 +89,16 @@ export function EnginesPanel() {
                   called them: this tab showed the Reversal engine in detail
                   and said nothing about Breakout beyond a Start/Stop card. */}
               <BreakoutSection />
+              <section className="mt-4 border-t border-line pt-3">
+                <h3 className="mb-2 text-xs font-semibold text-ink-1">
+                  Breakout engine capabilities
+                </h3>
+                <CapabilitiesSection
+                  engine="breakout"
+                  settings={asObject(c.state.data.settings)}
+                  onSave={(key, value) => void c.saveSetting(key, value)}
+                />
+              </section>
               <div className="mt-4"><TuningExperimentsSection /></div>
             </Tabs.Content>
 

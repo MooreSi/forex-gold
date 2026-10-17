@@ -1,9 +1,11 @@
-import { CAPABILITIES } from "../content/capabilities";
+import { CAPABILITIES, type Capability } from "../content/capabilities";
 import { Tooltip } from "@/components/shared/Tooltip";
 
 interface CapabilitiesSectionProps {
   settings: Record<string, unknown>;
   onSave: (key: string, value: number) => void;
+  /** Which engine's switches to show. Each tab shows only its own. */
+  engine?: NonNullable<Capability["engine"]>;
 }
 
 function on(settings: Record<string, unknown>, key: string): boolean {
@@ -11,17 +13,18 @@ function on(settings: Record<string, unknown>, key: string): boolean {
 }
 
 /**
- * The Reversal engine's capability switches.
+ * One engine's capability switches (Reversal unless told otherwise).
  *
  * A switch whose dependency is off renders that fact beside it rather than
  * quietly doing nothing. "Does NOTHING unless X is also on" was a tooltip in
  * the NiceGUI panel; a tooltip is not where you put the reason a setting has
  * no effect.
  */
-export function CapabilitiesSection({ settings, onSave }: CapabilitiesSectionProps) {
+export function CapabilitiesSection({ settings, onSave, engine = "reversal" }: CapabilitiesSectionProps) {
   return (
     <div className="grid gap-2 md:grid-cols-2">
       {CAPABILITIES.map((cap) => {
+        if ((cap.engine ?? "reversal") !== engine) return null;
         const dependencyOff = cap.dependsOn && !on(settings, cap.dependsOn.key);
         return (
           <label

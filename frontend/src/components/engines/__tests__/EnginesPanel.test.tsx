@@ -344,6 +344,36 @@ describe("the two engines have a tab each", () => {
       .toBeInTheDocument();
   });
 
+  it("puts the Breakout ML switches on the Breakout tab, not the Reversal one", async () => {
+    // Owner, 2026-10-17: they configure the Breakout engine, so they belong
+    // with it. On the Reversal tab they read as Reversal switches.
+    render(<EnginesPanel />);
+    await openReversalTab();
+    await screen.findByTestId("capability-htf_bias_asian_exempt");
+    expect(screen.queryByTestId("capability-bo_ml_realised_r_label")).toBeNull();
+    expect(screen.queryByTestId("capability-bo_ml_time_decay_enabled")).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: /Breakout engine/ }));
+
+    expect(await screen.findByTestId("capability-bo_ml_realised_r_label")).toBeInTheDocument();
+    expect(screen.getByTestId("capability-bo_ml_time_decay_enabled")).toBeInTheDocument();
+    expect(screen.queryByTestId("capability-htf_bias_asian_exempt")).toBeNull();
+  });
+
+  it("saves a Breakout switch from the Breakout tab", async () => {
+    render(<EnginesPanel />);
+    await userEvent.click(await screen.findByRole("tab", { name: /Breakout engine/ }));
+    await screen.findByTestId("capability-bo_ml_realised_r_label");
+
+    await userEvent.click(screen.getByLabelText("Breakout ML learns what trades really made"));
+
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find((c) => c[1]?.method === "PUT");
+      expect(put).toBeTruthy();
+      expect(JSON.parse(put![1].body)).toEqual({ bo_ml_realised_r_label: 1 });
+    });
+  });
+
   it("still starts and stops either engine from above the tabs", async () => {
     // Start/Stop is not per-tab: an operator stopping an engine should not
     // have to find the right tab first.

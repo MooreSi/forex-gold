@@ -416,6 +416,15 @@ the comparison is not yet discriminating between four of its five arms, and a
 reader glancing at it should know the sample is one afternoon rather than a
 week.
 
+## Each switch renders on its own engine's tab (2026-10-17)
+
+`frontend/src/components/engines/content/capabilities.ts` holds every Signal
+Generator switch; an entry's `engine` field (unset = Reversal) picks the tab
+it renders on. The two Breakout ML switches (`bo_ml_*`) are on the Breakout
+engine tab. Keep them in that one file: the Python switch tests in
+`tests/risk/` read it by path, and `test_cme_context_switch.py` pins
+`CAPABILITIES.map` in `CapabilitiesSection.tsx`.
+
 ## The card is "Reversal Engine Tuning", and one switch on it is inert (2026-09-17)
 
 Renamed from "Reversal Engine Capabilities" at the owner's request. The

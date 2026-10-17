@@ -1,5 +1,6 @@
 /**
- * The Reversal engine's capability switches, as data.
+ * The Signal Generator's capability switches, as data. Each one renders on
+ * the tab of the engine it configures (`engine`, Reversal when unset).
  *
  * Transcribed from `frontend/pages/reversal_panel/_capabilities.py`. One of
  * them does nothing on its own, and saying so is not optional: a switch that
@@ -12,6 +13,8 @@ export interface Capability {
   description: string;
   /** The setting that must also be on, and where it lives. */
   dependsOn?: { key: string; label: string; where: string };
+  /** The engine tab it renders on. Unset means Reversal. */
+  engine?: "reversal" | "breakout";
 }
 
 export const CAPABILITIES: Capability[] = [
@@ -152,6 +155,7 @@ export const CAPABILITIES: Capability[] = [
   },
   {
     key: "bo_ml_realised_r_label",
+    engine: "breakout",
     label: "Breakout ML learns what trades really made",
     description:
       "Off, the Breakout model is told every win made 1R and every loss " +
@@ -163,9 +167,11 @@ export const CAPABILITIES: Capability[] = [
   },
   {
     key: "bo_ml_time_decay_enabled",
+    engine: "breakout",
     label: "Breakout ML weights by age, not by count",
     description:
-      "The Breakout version of the switch above: weights halve every 14 " +
+      "The Breakout version of the Reversal tab's \"Reversal ML remembers " +
+      "more than a few days\": weights halve every 14 " +
       "days with a floor of a quarter, and overlapping trades share a vote, " +
       "instead of a 40-trade half-life. It changes which signals the ML " +
       "gate lets through, so try it on the demo account first. " +

@@ -27,6 +27,14 @@ Simulator semantics (matches engine._check_outcomes):
   - conservative intrabar tie-break: SL fills before TP within the same M1 bar
 Not modelled: news windows, spread gate, Claude review, ML gate — all of which
 only REMOVE trades, so live selectivity is >= backtest selectivity.
+
+Entries are checked in the live cycle's order: break-and-go, break-and-retest,
+then the liquidity sweep. Until 2026-10-17 the sweep was missing, and sweeps
+were 140 of the 157 signals the engine had closed; the bars also reached the
+level finder without the `ts` key `market/levels._session_range` reads, so no
+Asian high or low was ever replayed. The live cycle has read CLOSED M5 bars
+since the same date (`signal_generator.cycle_candles`), which is what this
+always replayed.
 """
 from __future__ import annotations
 
@@ -36,7 +44,8 @@ from typing import Optional
 
 from backend.src.services.breakout_signal import adaptive_params as ap
 from backend.src.services.breakout_signal.signal_generator import (
-    check_breakout_go, check_breakout_retest, calculate_breakout_risk_levels,
+    check_breakout_go, check_breakout_retest, check_liquidity_sweep,
+    calculate_breakout_risk_levels,
 )
 from backend.src.services.market.indicators import (
     compute_h4_bias, compute_adx, compute_macd_hist,
@@ -106,6 +115,8 @@ def run_walkforward(candles: dict, overrides: Optional[dict] = None) -> list[dic
     DB values otherwise). Returns a list of trade dicts."""
     m5, m1 = candles["M5"], candles["M1"]
     h1, h4 = candles["H1"], candles["H4"]
+    # The level finder reads the session off `ts`; these bars are UTC `time`.
+    h1 = [c if "ts" in c else {**c, "ts": c["time"]} for c in h1]
     m1_times = [c["time"] for c in m1]
     h1_times = [c["time"] for c in h1]
     h4_times = [c["time"] for c in h4]
@@ -172,6 +183,8 @@ def run_walkforward(candles: dict, overrides: Optional[dict] = None) -> list[dic
                 cand = check_breakout_go(m5c, key_levels, htf, h4b, price, atr, adx, macd)
             if not cand:
                 cand = check_breakout_retest(m5c, key_levels, htf, h4b, price, atr, adx, macd)
+            if not cand:
+                cand = check_liquidity_sweep(m5c, key_levels, htf, h4b, price, atr, adx, macd)
             if not cand:
                 continue
             if cand.get("broken_level_type") in _BLOCKED_LEVEL_TYPES:

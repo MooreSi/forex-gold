@@ -14,9 +14,27 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
+from backend.src.services.market import bar_clock
 from backend.src.services.risk import capability_gates as _caps
 
 _log = logging.getLogger("reversal_engine")
+
+
+def utc_h1(h1_candles: list, tick, now: float, m15_candles: list = None) -> list:
+    """The cycle's H1 bars stamped in UTC, the forming bar kept.
+
+    `level_detector.get_asia_range` reads the session off each bar's stamp,
+    and the bridge stamps bars in broker time (New York 17:00 = 00:00). Read
+    raw, "00:00-07:59" was 21:00-04:59 UTC in the US summer, and every replay
+    of this engine (true-UTC Dukascopy bars) measured a different range from
+    the one it traded (2026-10-17, `market/bar_clock`).
+
+    When the tick is too stale to set the clock, or the M15 bars (whose last
+    bar opened minutes ago) contradict it, the bars are returned as they came,
+    which is what the cycle always did with them.
+    """
+    off = bar_clock.measured_offset_s(tick, m15_candles, now)
+    return list(h1_candles or []) if off is None else bar_clock.utc_stamped(h1_candles, off)
 
 
 def cycle_context(atr: float, adx: float, htf: str, session: str,

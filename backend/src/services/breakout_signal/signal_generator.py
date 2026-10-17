@@ -40,6 +40,31 @@ from backend.src.services.market.sessions import (
     session_quality,
     session_is_active,
 )
+from backend.src.services.market import bar_clock
+
+
+def cycle_candles(m5_raw: list[dict], h1_raw: list[dict], tick,
+                  now: float) -> tuple[list[dict], list[dict]]:
+    """What the M5 cycle analyses: the M5 bars that have CLOSED, and the H1
+    bars (the forming one kept, as today's range so far), both in UTC.
+
+    The bridge's last bar is still forming, and every check below says it
+    reads "the last closed candle"; until 2026-10-17 it was handed the
+    forming one, whose close is the live price. Its stamps are broker time,
+    which put `market/levels._session_range`'s Asian hours three hours early.
+    See `market/bar_clock`.
+
+    When the clock cannot be set (`bar_clock.measured_offset_s`: a tick too
+    stale, as in a shut market, or one the M5 bars contradict) the forming
+    bar is still dropped and the stamps are left as they came, which is what
+    the cycle always did with them. Refusing instead would turn every
+    weekend's "Market closed" into "No market data": this cycle fetches
+    before it asks about the weekend.
+    """
+    off = bar_clock.measured_offset_s(tick, m5_raw, now)
+    if off is None:
+        return list(m5_raw or [])[:-1], list(h1_raw or [])
+    return bar_clock.utc_closed(m5_raw, 300, off, now), bar_clock.utc_stamped(h1_raw, off)
 
 
 # ── Breakout detection ────────────────────────────────────────────────────────

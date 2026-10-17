@@ -794,3 +794,78 @@ and were deleted; only the four frozen blocklists remain.
   an edge, and handover 040 found ATR deciles non-monotonic against P&L. A
   tree model can use a non-monotonic input; whether it does is for a demo
   session to show, not this note.
+
+## The signal generator review (2026-10-17, docs/todo/020)
+
+Owner: "full review of all three signal generators ... find that trading
+edge". Defects fixed below; the edge search found none. The bridge facts
+behind the first two are in `market/bar_clock.py`.
+
+- **Breakout judged the FORMING M5 bar as the closed one.** `_run_cycle`
+  passed `get_candles("M5", 80)` straight to the three entry checks, and
+  `copy_rates_from_pos(..., 0, n)` ends with the bar still forming. Every
+  check documents "the last closed candle"; `check_liquidity_sweep`'s "closed
+  back inside" was "is back inside at this second", once a minute. Sweeps were
+  140 of 157 closed signals and won 34% at a 1:1 first target, losses
+  stopping out after 22 minutes on average. Now `signal_generator.cycle_candles`
+  hands the cycle the M5 bars that have closed (it asks for 81 so there are
+  still 80) and stamps both M5 and H1 in UTC. The forming H1 bar stays: it is
+  today's range so far, which the bias and the daily midpoint read on purpose.
+  With a tick over 30 minutes stale (a shut market; this cycle fetches before
+  its weekend check) the forming bar still goes and the stamps stay as they
+  came. Pinned by `tests/breakout_signal/test_the_cycle_reads_closed_bars.py`.
+- **Two clock readers took broker time for UTC.** `market/levels._session_range`
+  (Breakout's Asian high/low, meant as 23:00-07:59 UTC) was 20:00-04:59 UTC.
+  `level_detector.get_asia_range` (Reversal, 00:00-07:59 UTC) was 21:00-04:59
+  UTC live, the New York close in and Tokyo's last three hours out, while every
+  replay of the engine (`historical_signals`, true-UTC Dukascopy bars)
+  measured the documented session. `cycle_setup.utc_h1` now restamps the
+  cycle's H1 bars. Asia levels were 261 of the ~5,800 Reversal signals since
+  August. Pinned by `tests/reversal_engine/test_asia_range_reads_utc.py`.
+- **Breakout's walk-forward never replayed a sweep.** `backtest.run_walkforward`
+  checked go and retest only, so the harness that exists to stop a bad
+  recalibration measured about a tenth of what the engine trades. It now asks
+  `check_liquidity_sweep` third, as the cycle does, and gives the level
+  finder `ts` stamps (it had none, so no Asian level was ever replayed).
+  Still not modelled there: the 12-14 UTC hour block it applies and the live
+  virtual ledger does not, the daily loss stop, the consecutive-loss cooldown.
+  Pinned by `tests/breakout_signal/test_backtest_replays_what_the_engine_trades.py`.
+- **A faithful replay of the live cycle agrees with the real ledger.** A
+  research replay (docs/todo/020) runs the production detection functions
+  every minute on Dukascopy M1 with the stored params, the forming bar and
+  broker stamps as live had them. Over the live window (22 Jul - 8 Oct 2026)
+  60 replay trades matched live ones (same direction, level within 3 points,
+  within 10 minutes); outcomes agreed on 55 (92%), mean ledger R -0.183
+  replay against -0.163 live. It does not model news windows, cross-engine
+  conflicts, the velocity path or downtime, which is why only 60 of 157 match.
+- **No version of Breakout has an edge** (2023 - 16 Oct 2026, fills on the
+  correct side, 0.28 spread + 0.05 slippage, t clustered by day):
+
+  | Version | n | mean R | t |
+  |---|---|---|---|
+  | as it ran (forming bar, broker clock) | 1,268 | -0.064 | -2.25 |
+  | fixed (closed bars, UTC) | 804 | -0.021 | -0.60 |
+  | sweeps traded the other way, fixed | 819 | -0.034 | -1.04 |
+
+  The fix is right because it is what the code says and what the backtest
+  measures, not because it makes money. Post hoc and NOT an edge: closed-bar
+  retests made +0.405R over 39 (t 2.4); 020 registers it as a forward test.
+  2023 had 6 closed-bar trades: the fixed-point thresholds (3-point break, $10
+  round levels, 2.5-point merge) were set for $2,000-4,000 gold and starve the
+  engine below that, so earlier years cannot test these rules as written.
+- **Found, measured, not changed** (each needs the owner, docs/simon-handover/054):
+  - Breakout's virtual ledger charges a BUY the spread twice. `entry_mid` is
+    the ask for both directions; a BUY exits on the bid (spread already paid)
+    and `_close_and_learn` then subtracts `cost_pts`, which includes the
+    spread. A SELL is charged once. About 0.03-0.04R a BUY; it moves the ML
+    label's win/loss line for small winners. A P&L path (golden rule 5).
+  - Reversal's Unicorn chain (`ict_patterns`) reads the forming M15 bar the
+    same way Breakout did. Not changed: `historical_signals` replays it with
+    the forming bar too, so live and its measurement already agree, and the
+    Unicorn is about 2% of signals.
+  - `liquidity_map` filters broker-stamped M5 bars against a UTC session
+    anchor. Dormant: `liquidity_map_levels_enabled` is off.
+  - Trend PA's backtest fills a stop at the stop even when the bar opened
+    beyond it. 9 of 1,147 replayed losses (2019 - Oct 2026), 0.004R a trade:
+    not worth changing code the pre-registered trials share. The same replay:
+    defaults, 1,755 trades, -0.135R.

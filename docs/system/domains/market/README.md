@@ -27,6 +27,7 @@ and nothing could be measured against anything else.
 - `order_flow.py` -- feed capability probe, cumulative delta (measured or tick-rule), spread dynamics
 - `correlation.py` -- cross-asset correlation and a correlation-aware exposure number
 - `validation.py` -- purged/embargoed k-fold, walk-forward, deflated Sharpe, probability of backtest overfitting, uniqueness weights
+- `bar_clock.py` -- the bridge's bars as an engine should read them: closed, and stamped in UTC (see below)
 - `sessions.py`, `levels.py`, `indicators.py`, `macro_context.py`, `news_window.py` -- arrived 2026-09-14 from the deleted Bounce engine (see below)
 
 ## Five modules arrived from a deleted engine (2026-09-14)
@@ -103,3 +104,23 @@ them and deliberately did not pre-empt `docs/todo/bugs/057`.
   (`dpm.engine.is_weekly_market_closed`, `market.sessions.get_session`). The
   test suite pins the clock (`tools/testing/fixed_clock.py`); a test about
   the boundaries must drive `detect_session_unpinned`.
+
+## The bridge's bars: the last one is forming, every stamp is broker time (2026-10-17)
+
+`/candles` is MT5 `copy_rates_from_pos(symbol, tf, 0, count)`. Position 0 is
+the bar still forming and it comes **last**: its close is the live price. And
+every stamp is broker time (New York 17:00 = 00:00, UTC+3 in the US summer,
+UTC+2 in its winter) written as a UTC epoch; measured 2026-10-17, Friday's last
+H1 bar read 23:00 against a 21:00 UTC close. `/candles_range` is the one path
+the bridge converts to UTC itself. `bar_clock` measures the offset each cycle
+from the tick (MT5 `tick.time`, same clock), refuses a tick 30 minutes stale or
+from more than a minute in the future, and gives `utc_stamped` / `utc_closed`.
+`measured_offset_s` also checks the tick against the newest short-timeframe
+bar and refuses when they disagree: a tick the client stamped with its own
+clock (the fallback when the bridge sends none) reads "no offset" against bars
+three hours ahead, and `utc_closed` would then call every recent bar unclosed.
+Breakout (`signal_generator.cycle_candles`) and Reversal (`cycle_setup.utc_h1`)
+use it; Trend PA drops the forming bar and reads the offset off it
+(`trend_pa.service.broker_offset`). **Any new reader of an hour from a bar
+stamp, or of how a bar closed, must go through one of these.** What it cost
+before is in the engines README, "The signal generator review".

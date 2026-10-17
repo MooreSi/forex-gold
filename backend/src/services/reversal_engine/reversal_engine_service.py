@@ -243,10 +243,9 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         # Fetch candles
         try:
             h1_candles  = await self._bridge.get_candles("H1", 50)
-            # 80 bars (~20h) rather than the old 20 -- the GD2/Unicorn
-            # detector (ict_patterns.find_unicorn_setup) needs real lookback
-            # for its structure-shift and breaker-block checks, validated
-            # against live history at 60+ bars.
+            # 80 bars (~20h) rather than the old 20 -- the GD2/Unicorn detector
+            # (ict_patterns.find_unicorn_setup) needs real lookback for its structure-shift
+            # and breaker-block checks, validated against live history at 60+ bars.
             m15_candles = await self._bridge.get_candles("M15", 80)
             # get_htf_bias()'s H4-confirmation branch existed but was never
             # given h4_candles at either call site, so H1 alone decided bias
@@ -255,6 +254,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
             # get_htf_bias() actually looks at (h4_candles[-6:]).
             h4_candles  = await self._bridge.get_candles("H4", 6)
             tick        = await self._bridge.get_tick()
+            h1_candles  = _setup.utc_h1(h1_candles, tick, time.time(), m15_candles)  # Asia in UTC
         except Exception as exc:
             _log.debug("[RE-Engine] candle fetch error: %s", exc)
             self._status_msg = "MT5 bridge offline"

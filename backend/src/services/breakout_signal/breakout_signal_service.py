@@ -41,7 +41,7 @@ from backend.src.services.breakout_signal.signal_generator import (
     check_breakout_go,
     check_breakout_retest,
     check_liquidity_sweep,
-    calculate_breakout_risk_levels,
+    calculate_breakout_risk_levels, cycle_candles,
 )
 from backend.src.services.dpm.engine import compute_atr
 from backend.src.services.breakout_signal.claude_reviewer import review_signal
@@ -224,8 +224,9 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
 
         try:
             tick        = await self._bridge.get_tick()
-            m5_candles  = await self._bridge.get_candles("M5",  80)
-            h1_candles  = await self._bridge.get_candles("H1", 120)
+            m5_candles, h1_candles = cycle_candles(   # closed M5, UTC stamps
+                await self._bridge.get_candles("M5", 81),
+                await self._bridge.get_candles("H1", 120), tick, time.time())
             h4_candles  = await self._bridge.get_candles("H4",  _H4_CANDLES)
 
             if not tick or not m5_candles or not h1_candles:

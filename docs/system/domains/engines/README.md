@@ -853,12 +853,22 @@ behind the first two are in `market/bar_clock.py`.
   2023 had 6 closed-bar trades: the fixed-point thresholds (3-point break, $10
   round levels, 2.5-point merge) were set for $2,000-4,000 gold and starve the
   engine below that, so earlier years cannot test these rules as written.
+- **Breakout's virtual ledger charged a BUY the spread twice; fixed 2026-10-17
+  (owner, docs/simon-handover/054 decision A).** `entry_mid` is the ask for
+  both directions; a BUY exits on the bid (spread already in its prices) and
+  every leg was then charged `cost_pts`, which includes the spread. A SELL,
+  booked ask to ask, was charged once. About 0.03-0.04R a BUY, enough to move
+  the ML label's win/loss line on small winners. `breakout_signal_manage.ledger_cost_pts`
+  now charges a BUY leg `cost_pts - spread` (floored at 0, against the flat
+  0.35 fallback) on the stop, TP3, time stop, both partials and the MT5-sync
+  fallback; SELL figures are unchanged. **The BUY break-even stop still sits
+  at `entry + cost_pts`**, one spread past a BUY's true break-even, so a BUY
+  stopped there now books about +1 spread on the remainder rather than 0;
+  moving that stop is management, not ledger, and was not part of the
+  decision. Rows closed before the fix keep their old figures. Pinned by
+  `tests/breakout_signal/test_a_buy_pays_the_spread_once.py`, which was run
+  against the old code first with today's numbers.
 - **Found, measured, not changed** (each needs the owner, docs/simon-handover/054):
-  - Breakout's virtual ledger charges a BUY the spread twice. `entry_mid` is
-    the ask for both directions; a BUY exits on the bid (spread already paid)
-    and `_close_and_learn` then subtracts `cost_pts`, which includes the
-    spread. A SELL is charged once. About 0.03-0.04R a BUY; it moves the ML
-    label's win/loss line for small winners. A P&L path (golden rule 5).
   - Reversal's Unicorn chain (`ict_patterns`) reads the forming M15 bar the
     same way Breakout did. Not changed: `historical_signals` replays it with
     the forming bar too, so live and its measurement already agree, and the

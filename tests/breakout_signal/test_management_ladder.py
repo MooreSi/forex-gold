@@ -159,10 +159,15 @@ class TestTp1:
         assert repo.partials[0]["frac"] == mg._TP1_FRAC
 
     def test_the_booked_money_is_net_of_cost(self, lab):
-        """9 points, less 0.6 cost, x 0.10 lots x 0.33 x 100 = $27.72."""
+        """9 points x 0.10 lots x 0.33 x 100 = $29.70. The 0.6 cost here is
+        all spread (ask 4011.6 - bid 4011.0), and a BUY booked from the ask
+        to the bid has paid it already. This read $27.72 -- the spread
+        charged twice -- until the owner's 2026-10-17 decision
+        (docs/simon-handover/054); test_a_buy_pays_the_spread_once.py has
+        the full BUY/SELL account."""
         _, repo = _manage(lab, bid=4011.0, ask=4011.6)
 
-        assert repo.partials[0]["dollars"] == 27.72
+        assert repo.partials[0]["dollars"] == 29.70
 
     def test_the_stop_goes_to_breakeven_PLUS_the_cost(self, lab):
         """Breakeven on price is a loss on money: the round trip was still

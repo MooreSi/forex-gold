@@ -28,6 +28,23 @@ _TP1_FRAC = 0.33
 _TP2_FRAC = 0.33
 
 
+def ledger_cost_pts(direction: str, cost_pts: float, spread: float) -> float:
+    """What one leg is charged on this engine's ledger.
+
+    `entry_mid` is the ASK for both directions, so a BUY is booked from the
+    ask out to the bid and the spread is already in its two prices; a SELL
+    is booked from the ask out to the ask, so it is charged here. Until
+    2026-10-17 both were charged the whole `cost_pts` (spread + slippage +
+    commission) and a BUY paid the spread twice (owner decision,
+    docs/simon-handover/054). Floored at nothing: the flat 0.35 fallback in
+    `_compute_cost_pts` against a wider spread must not become a credit.
+    The break-even stop is placed off the whole cost, unchanged.
+    """
+    if direction == "BUY":
+        return max(0.0, cost_pts - spread)
+    return cost_pts
+
+
 class _ManagementMixin:
     def _compute_cost_pts(self, spread_raw: float) -> float:
         """Round-trip trade cost in price units (same scale as pnl_pts)."""
@@ -159,6 +176,7 @@ class _ManagementMixin:
         sl_moved  = bool(sig.get("sl_moved_to_be", 0))
 
         eval_price = bid if direction == "BUY" else ask
+        leg_cost = ledger_cost_pts(direction, cost_pts, ask - bid)
 
         # ── Time stop ─────────────────────────────────────────────────────
         _tp_trig = float(sig.get("trigger_price") or entry or 0)
@@ -176,7 +194,7 @@ class _ManagementMixin:
                 self._close_and_learn(
                     sig_id, eval_price, _ts_outcome,
                     f"Time stop after {int((now - trigger_time) / 60)}min @ {_unreal_bo:+.1f}pts",
-                    entry, direction, lot, cost_pts,
+                    entry, direction, lot, leg_cost,
                 )
                 _log.info(
                     "[BO-Engine] %s time stop → %s (%+.1fpts after %dmin)",
@@ -193,7 +211,7 @@ class _ManagementMixin:
             outcome = "be" if sl_moved else "loss"
             self._close_and_learn(
                 sig_id, eval_price, outcome, f"SL @ {eval_price:.2f}",
-                entry, direction, lot, cost_pts,
+                entry, direction, lot, leg_cost,
             )
             _log.info("[BO-Engine] %s %s", sig.get("signal_ref"), outcome.upper())
             self._notify_refresh()
@@ -207,7 +225,7 @@ class _ManagementMixin:
         if tp3_hit:
             self._close_and_learn(
                 sig_id, eval_price, "win", f"TP3 @ {eval_price:.2f}",
-                entry, direction, lot, cost_pts,
+                entry, direction, lot, leg_cost,
             )
             _log.info("[BO-Engine] %s WIN (TP3)", sig.get("signal_ref"))
             self._notify_refresh()
@@ -224,7 +242,7 @@ class _ManagementMixin:
         )
         if tp2_hit:
             leg_pts     = (eval_price - entry) if direction == "BUY" else (entry - eval_price)
-            leg_net_dol = round((leg_pts - cost_pts) * lot * _TP2_FRAC * 100.0, 2)
+            leg_net_dol = round((leg_pts - leg_cost) * lot * _TP2_FRAC * 100.0, 2)
             bdb.book_partial_close(sig_id, leg_net_dol, _TP2_FRAC, f"TP2 partial @ {eval_price:.2f}")
             bdb.set_stop_loss(sig_id, tp1)
             _log.info(
@@ -241,7 +259,7 @@ class _ManagementMixin:
         )
         if tp1_hit:
             leg_pts     = (eval_price - entry) if direction == "BUY" else (entry - eval_price)
-            leg_net_dol = round((leg_pts - cost_pts) * lot * _TP1_FRAC * 100.0, 2)
+            leg_net_dol = round((leg_pts - leg_cost) * lot * _TP1_FRAC * 100.0, 2)
             bdb.book_partial_close(sig_id, leg_net_dol, _TP1_FRAC, f"TP1 partial @ {eval_price:.2f}")
             be_px = round(entry + cost_pts, 2) if direction == "BUY" else round(entry - cost_pts, 2)
             bdb.move_sl_to_be(sig_id, be_price=be_px)

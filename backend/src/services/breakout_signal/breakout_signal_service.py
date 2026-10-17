@@ -47,7 +47,7 @@ from backend.src.services.dpm.engine import compute_atr
 from backend.src.services.breakout_signal.claude_reviewer import review_signal
 from backend.src.services.breakout_signal.breakout_signal_learn import _LearnMixin
 from backend.src.services.breakout_signal.breakout_signal_velocity import _VelocityMixin
-from backend.src.services.breakout_signal.breakout_signal_manage import _ManagementMixin
+from backend.src.services.breakout_signal.breakout_signal_manage import _ManagementMixin, ledger_cost_pts
 from backend.src.services.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
 
 if TYPE_CHECKING:
@@ -739,7 +739,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                         self._close_and_learn(
                             sig_id, _eval_close, _mt5_outcome,
                             f"MT5 closed (mt5_profit={_profit:.2f})",
-                            entry, direction, lot, cost_pts,
+                            entry, direction, lot, ledger_cost_pts(direction, cost_pts, ask - bid),
                         )
                         self._notify_refresh()
                         continue

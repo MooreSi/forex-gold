@@ -100,7 +100,12 @@ def broker_ts_to_local_date(ts, offset_minutes=_UNSET) -> Optional[date]:
         real_utc_epoch = float(ts) - BROKER_OFFSET
     except (TypeError, ValueError):
         return None
-    if offset_minutes is _UNSET:
-        from backend.src.services.risk import clock as _clock
-        return _clock.from_timestamp(real_utc_epoch).date()
-    return local_from_timestamp(real_utc_epoch, offset_minutes).date()
+    # OSError: CPython on Windows refuses a negative epoch, in fromtimestamp
+    # and in the local-zone astimezone after it (2026-10-17, main's CI).
+    try:
+        if offset_minutes is _UNSET:
+            from backend.src.services.risk import clock as _clock
+            return _clock.from_timestamp(real_utc_epoch).date()
+        return local_from_timestamp(real_utc_epoch, offset_minutes).date()
+    except (OSError, OverflowError, ValueError):
+        return None

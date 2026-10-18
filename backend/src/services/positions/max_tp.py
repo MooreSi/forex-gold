@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.services.positions import max_tp_repo as _repo
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,57 @@ def _tp_level_from_extreme(direction: str, extreme: float, tp_source_fn) -> str:
         elif direction == "SELL" and extreme <= tp:
             hit = f"TP{i}"
     return hit
+
+
+def _tp_source_for(t: dict):
+    """Which TP ladder this trade's Max TP is measured against.
+
+    A Telegram channel's trade is graded on the channel's own targets (the
+    v0.23 choice: how far price ran against what the signal promised), even
+    when a strategy or template overrode them.
+
+    A trade one of the app's own engines opened is graded on the TPs it was
+    actually given. The engine's signal ladder is its internal one -- for the
+    Reversal Engine $1 rungs measured from the entry ZONE, not the fill --
+    and a template then places the real trade with its own, wider ladder.
+    Measured against the signal's, a trade stopped out short of its own TP1
+    read "TP3" (demo ticket 2170604954, 2026-10-12). Falls back to the
+    signal ladder when the trade carries no TPs of its own.
+    """
+    from backend.src.services.analytics.labels import is_internal_engine
+
+    if (is_internal_engine(t.get("tg_source") or "")
+            and any(t.get(f"tp{i}") is not None for i in range(1, 9))):
+        # The trade's ladder alone: filling its empty rungs from the signal's
+        # would mix two ladders and read a $1 signal rung as the trade's TP5.
+        return lambda idx: t.get(f"tp{idx}")
+
+    def _tp_source(idx: int):
+        sig_v = t.get(f"sig_tp{idx}")
+        return sig_v if sig_v is not None else t.get(f"tp{idx}")
+    return _tp_source
+
+
+# app_config key marking that engine rows graded on the signal ladder have
+# been cleared for the sweep to recompute. Once only: a value written after
+# the repair is already on the right ladder.
+_ENGINE_LADDER_REPAIR_KEY = "max_tp_engine_ladder_repaired"
+
+
+def repair_engine_max_tp_once() -> int:
+    """Clear max_tp_hit on closed engine trades graded before `_tp_source_for`
+    so the next sweep recomputes them. Returns how many rows it cleared."""
+    from backend.src.services.analytics.labels import is_internal_engine
+
+    if db_module.get_app_config(_ENGINE_LADDER_REPAIR_KEY) == "1":
+        return 0
+    ids = [trade_id for trade_id, tg_source in _repo.get_closed_trades_with_max_tp_source()
+           if is_internal_engine(tg_source or "")]
+    _repo.clear_max_tp_hit(ids)
+    db_module.set_app_config(_ENGINE_LADDER_REPAIR_KEY, "1")
+    if ids:
+        log.info("[MaxTP] cleared %d engine trades for regrading on their own TPs", len(ids))
+    return len(ids)
 
 
 def _has_tp_ladder(t: dict) -> bool:
@@ -99,6 +151,10 @@ async def max_tp_checker_sweep(bridge: Any) -> None:
         fill_realised_r()
     except Exception as e:                       # noqa: BLE001
         log.debug("fill_realised_r failed: %s", e)
+    try:
+        repair_engine_max_tp_once()
+    except Exception as e:                       # noqa: BLE001
+        log.debug("repair_engine_max_tp_once failed: %s", e)
     cutoff = time.time() - 1800  # 30 minutes ago
     pending = db_module.get_trades_pending_max_tp(cutoff)
     for t in pending:
@@ -136,11 +192,7 @@ async def max_tp_checker_sweep(bridge: Any) -> None:
             else:
                 extreme = min(float(c.get("low", float("inf")) or float("inf")) for c in candles)
 
-            def _tp_source(idx: int, t=t):
-                sig_v = t.get(f"sig_tp{idx}")
-                return sig_v if sig_v is not None else t.get(f"tp{idx}")
-
-            hit = _tp_level_from_extreme(direction, extreme, _tp_source)
+            hit = _tp_level_from_extreme(direction, extreme, _tp_source_for(t))
 
             db_module.save_max_tp_hit(t["trade_id"], hit)
             log.info(
@@ -203,11 +255,7 @@ async def backfill_max_tp_hit_corrected(bridge: Any) -> None:
             else:
                 extreme = min(float(c.get("low", float("inf")) or float("inf")) for c in candles)
 
-            def _tp_source(idx: int, t=t):
-                sig_v = t.get(f"sig_tp{idx}")
-                return sig_v if sig_v is not None else t.get(f"tp{idx}")
-
-            hit = _tp_level_from_extreme(direction, extreme, _tp_source)
+            hit = _tp_level_from_extreme(direction, extreme, _tp_source_for(t))
             if hit == t.get("old_hit"):
                 continue
 

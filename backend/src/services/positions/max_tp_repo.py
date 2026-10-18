@@ -33,6 +33,25 @@ def save_max_tp_hit(trade_id: str, value: str) -> None:
         )
 
 
+def get_closed_trades_with_max_tp_source() -> list[tuple[str, str]]:
+    """(trade_id, tg_source) of every closed trade that has a max_tp_hit."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT trade_id, tg_source FROM vantage_simulated_trades "
+            "WHERE status='closed' AND max_tp_hit IS NOT NULL"
+        ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def clear_max_tp_hit(trade_ids: list[str]) -> None:
+    """Unset max_tp_hit so the sweep computes it again."""
+    with db() as conn:
+        conn.executemany(
+            "UPDATE vantage_simulated_trades SET max_tp_hit=NULL WHERE trade_id=?",
+            [(t,) for t in trade_ids],
+        )
+
+
 def get_trades_with_max_tp_set() -> list[dict]:
     """Return closed trades that already have max_tp_hit computed.
 

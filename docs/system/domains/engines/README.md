@@ -861,11 +861,13 @@ behind the first two are in `market/bar_clock.py`.
   the ML label's win/loss line on small winners. `breakout_signal_manage.ledger_cost_pts`
   now charges a BUY leg `cost_pts - spread` (floored at 0, against the flat
   0.35 fallback) on the stop, TP3, time stop, both partials and the MT5-sync
-  fallback; SELL figures are unchanged. **The BUY break-even stop still sits
-  at `entry + cost_pts`**, one spread past a BUY's true break-even, so a BUY
-  stopped there now books about +1 spread on the remainder rather than 0;
-  moving that stop is management, not ledger, and was not part of the
-  decision. Rows closed before the fix keep their old figures. Pinned by
+  fallback; SELL figures are unchanged. The BUY break-even stop after TP1
+  moved with it (owner, 2026-10-18): it was `entry + cost_pts`, one spread
+  past a BUY's true break-even, so a BUY was stopped about 0.28 points sooner
+  than a SELL and, once the ledger was fixed, booked +1 spread on the rest.
+  It is now `entry + ledger_cost_pts`; a SELL's `entry - cost_pts` was exact.
+  This changes when virtual BUYs exit, not only what they book. Rows closed
+  before either fix keep their old figures. Pinned by
   `tests/breakout_signal/test_a_buy_pays_the_spread_once.py`, which was run
   against the old code first with today's numbers.
 - **Found, measured, not changed** (each needs the owner, docs/simon-handover/054):

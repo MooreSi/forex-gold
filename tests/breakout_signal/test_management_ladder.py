@@ -171,10 +171,17 @@ class TestTp1:
 
     def test_the_stop_goes_to_breakeven_PLUS_the_cost(self, lab):
         """Breakeven on price is a loss on money: the round trip was still
-        paid. The stop is placed where the trade actually scratches."""
+        paid. The stop is placed where the trade actually scratches.
+
+        For a BUY that is entry plus the costs that are NOT spread: it was
+        bought at the ask and is closed at the bid, so the spread is already
+        in its prices. Here the whole 0.6 cost is spread (ask 4011.6 - bid
+        4011.0), so it scratches at the entry. This read 4002.6, one spread
+        past break-even, until the owner's 2026-10-18 decision
+        (docs/simon-handover/054)."""
         _, repo = _manage(lab, bid=4011.0, ask=4011.6)
 
-        assert repo.be_moves == [(1, 4002.6)]
+        assert repo.be_moves == [(1, 4002.0)]
 
     def test_a_sell_moves_its_breakeven_stop_the_other_way(self, lab):
         _, repo = _manage(lab, sig=_sig(direction="SELL", stop_loss=4014.0,

@@ -38,7 +38,8 @@ def ledger_cost_pts(direction: str, cost_pts: float, spread: float) -> float:
     commission) and a BUY paid the spread twice (owner decision,
     docs/simon-handover/054). Floored at nothing: the flat 0.35 fallback in
     `_compute_cost_pts` against a wider spread must not become a credit.
-    The break-even stop is placed off the whole cost, unchanged.
+    A BUY's break-even stop after TP1 is `entry + ledger_cost_pts` too: at
+    `entry + cost_pts` it sat one spread past break-even (owner, 2026-10-18).
     """
     if direction == "BUY":
         return max(0.0, cost_pts - spread)
@@ -261,7 +262,7 @@ class _ManagementMixin:
             leg_pts     = (eval_price - entry) if direction == "BUY" else (entry - eval_price)
             leg_net_dol = round((leg_pts - leg_cost) * lot * _TP1_FRAC * 100.0, 2)
             bdb.book_partial_close(sig_id, leg_net_dol, _TP1_FRAC, f"TP1 partial @ {eval_price:.2f}")
-            be_px = round(entry + cost_pts, 2) if direction == "BUY" else round(entry - cost_pts, 2)
+            be_px = round(entry + leg_cost, 2) if direction == "BUY" else round(entry - cost_pts, 2)
             bdb.move_sl_to_be(sig_id, be_price=be_px)
             _log.info(
                 "[BO-Engine] %s TP1 partial booked $%.2f — SL → BE+cost %.2f",

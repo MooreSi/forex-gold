@@ -167,6 +167,26 @@ class TestTheSecondPartial:
         assert repo.partials == [64.35] == [_true_usd("SELL", 3981.85, mg._TP2_FRAC)]
 
 
+class TestTheBreakEvenStop:
+    """After TP1 the stop on the rest moves to where it scratches. Owner,
+    2026-10-18: "fix it". It was `entry + cost_pts` for a BUY, one spread past
+    break-even, because the spread is already in a BUY's ask-to-bid prices;
+    a SELL's `entry - cost_pts` was exact and stays."""
+
+    def test_a_buy_moves_to_entry_plus_the_costs_that_are_not_spread(self, lab):
+        repo = lab(_buy(), bid=4012.15)
+        assert repo.sig["stop_loss"] == pytest.approx(ENTRY + SLIP)
+
+    def test_a_buy_stopped_there_books_nothing_on_the_rest(self, lab):
+        moved = lab(_buy(), bid=4012.15).sig
+        repo = lab(moved, bid=moved["stop_loss"])
+        assert repo.closed[0]["net_pnl_dollars"] == moved["partial_pnl_dollars"]
+
+    def test_a_sell_is_unchanged(self, lab):
+        repo = lab(_sell(), bid=3991.85 - SPREAD)
+        assert repo.sig["stop_loss"] == pytest.approx(ENTRY - COST)
+
+
 class TestTheTimeStop:
     def test_a_buy(self, lab):
         """Pinned at -76.50 before the fix."""

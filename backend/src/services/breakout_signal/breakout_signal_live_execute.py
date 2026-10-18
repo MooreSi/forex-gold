@@ -115,6 +115,9 @@ class _LiveExecuteMixin:
         """Place a real MT5 trade via the main engine when bo_live_execution is ON."""
         sig_id     = sig.get("id")
         signal_ref = sig.get("signal_ref") or f"BO-{sig_id or 0:04d}"
+        from backend.src.services.market import entry_contract
+        entry_contract.observe(bdb, "breakout", signal_ref, "dispatch_attempt", sig,
+                               sig.get("ml_features_json") or {}, source="Breakout Engine")
         direction  = (sig.get("direction") or "").upper()
 
         if self._main_engine is None:
@@ -193,8 +196,9 @@ class _LiveExecuteMixin:
                 from backend.src.services.dpm.engine import compute_atr
                 from backend.src.services.breakout_signal.signal_generator import (
                     compute_htf_bias, compute_h4_bias, compute_adx,
-                    compute_macd_hist, get_session,
+                    compute_macd_hist, get_session, cycle_candles,
                 )
+                m5_fresh, h1_fresh = cycle_candles(m5_fresh, h1_fresh, tick, time.time())
                 fresh_atr  = compute_atr(m5_fresh[-20:], period=14)
                 fresh_adx  = compute_adx(m5_fresh[-30:] if len(m5_fresh) >= 30 else m5_fresh)
                 fresh_htf  = compute_htf_bias(h1_fresh)
@@ -245,6 +249,11 @@ class _LiveExecuteMixin:
                 except Exception:
                     pass
                 fresh_feats = bo_ml.extract_features(fresh_sig)
+                entry_contract.observe(bdb, "breakout", signal_ref, "fill_recheck",
+                    {"signal": fresh_sig, "requested_price": fill_px,
+                     "feature_names": bo_ml.FEATURE_NAMES, "indicator_contract": "breakout-proxies-v1",
+                     "bid": getattr(tick, "bid", None), "ask": getattr(tick, "ask", None)},
+                    fresh_feats or {}, source="Breakout Engine")
                 if fresh_feats:
                     _fp = bo_ml.predict(fresh_feats)
                     if _fp is not None:
@@ -316,6 +325,8 @@ class _LiveExecuteMixin:
             )
             vantage_sig_id = main_sig["signal_id"]
             result = await self._main_engine.open_trade_from_signal(vantage_sig_id, tick=tick)
+            entry_contract.observe(bdb, "breakout", signal_ref, "broker_result",
+                {"signal": sig, "requested_price": fill_px, "result": result}, {}, source="Breakout Engine")
             _lt.mark(_lt_key, "e3_ordered")
             mt5_ticket = result.get("mt5_ticket")
             _log.info(

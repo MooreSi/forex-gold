@@ -481,17 +481,24 @@ class _LiveExecuteMixin:
         cfg = _caps.entry_trigger_config(rs)
         if cfg is None:
             return None
+        from backend.src.services.market import entry_contract
+        def observe(state, reason=None):
+            entry_contract.observe(re_db, "reversal", sig.get("signal_ref") or sig.get("id"),
+                "confirmation", {"confirmation_state": state, "reason": reason}, {}, source="Reversal Engine")
         try:
             from backend.src.services.market import entry_trigger as _et
             candles = await self._bridge.get_candles("M1", 30)
             level = float(sig.get("level_price") or 0.0)
             atr = float(sig.get("atr") or 0.0)
             if level <= 0:
+                observe("unknown", "level unavailable")
                 return None
-            result = _et.confirm(candles or [], level,
+            result = _et.confirm((candles or [])[:-1], level,
                                  str(sig.get("direction") or "BUY"), atr, cfg)
+            observe("confirmed" if result.passed else "refused", result.reason)
             return None if result.passed else result.reason
         except Exception as e:                    # noqa: BLE001
+            observe("unknown", str(e))
             _log.debug("[RE-Engine] entry trigger could not be evaluated: %s", e)
             return None
 

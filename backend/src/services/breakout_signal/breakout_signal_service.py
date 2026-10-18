@@ -1,17 +1,9 @@
-"""
-BreakoutEngine — trend-following / breakout signal engine.
+"""Breakout engine lifecycle, M5 generation and outcome routing.
 
-This is the thin orchestrator (task 030): lifecycle, the M5 signal-
-generation cycle, and the outcome-loop's routing live here; TP/SL/partial
-management + live-P&L reconciliation (_ManagementMixin), the real-time
-velocity monitor (_VelocityMixin), live order dispatch (_LiveExecuteMixin),
-and Claude batch tuning (_LearnMixin) are each their own file. Replaces
-engine.py -- see docs/todo/refactor/breakout-signal-migration/030-*.md for
-what moved where and why.
-
-Runs automatically alongside the bounce (TestSignal) engine.
-NEVER places MT5 orders — virtual tracking only until confidence is established.
-NEVER shares data with the bounce engine — separate DB, separate signals, separate ML.
+Management, velocity detection, live dispatch and learning are composed from
+their own mixins. Live dispatch requires bo_live_execution; virtual results
+and models use this engine's own database. Entry contracts and research limits
+are documented in docs/system/domains/engines/entry-research.md.
 """
 from __future__ import annotations
 
@@ -47,6 +39,7 @@ from backend.src.services.dpm.engine import compute_atr
 from backend.src.services.breakout_signal.claude_reviewer import review_signal
 from backend.src.services.breakout_signal.breakout_signal_learn import _LearnMixin
 from backend.src.services.breakout_signal.breakout_signal_velocity import _VelocityMixin
+from backend.src.services.breakout_signal import entry_safety
 from backend.src.services.breakout_signal.breakout_signal_manage import _ManagementMixin, ledger_cost_pts
 from backend.src.services.breakout_signal.breakout_signal_live_execute import _LiveExecuteMixin
 
@@ -219,6 +212,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
         if not await _db_module.to_db_thread(_node_roles.engines_generate_here):
             self.status_detail = NOT_GENERATING_HERE
             return
+        self._cached["observed_at"] = None  # failed refresh cannot revive old velocity context
 
         log_entry: dict = {"ts": time.time()}
 
@@ -286,6 +280,7 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 "htf_bias": htf_bias,
                 "h4_bias":  h4_bias,
                 "adx":      round(adx, 1),
+                "source_closed_at": float(m5_candles[-1]["ts"]) + 300,
             })
 
             key_levels = identify_key_levels(h1_candles, current_price, m15_candles=m5_candles)
@@ -300,6 +295,8 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 "session":    session,
                 "price":      current_price,
                 "m5_candles": m5_candles[-13:],
+                "observed_at": time.time(),
+                "source_closed_at": log_entry["source_closed_at"],
             })
 
             log_entry["key_levels"] = key_levels[:8]
@@ -565,6 +562,8 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 bdb.log_analysis(log_entry)
                 return
 
+        if await entry_safety.final_refused(tick, log_entry, velocity):
+            return
         ref_hash   = hashlib.sha256(
             f"{time.time()}{candidate['direction']}{risk['entry_mid']}".encode()
         ).hexdigest()[:8].upper()
@@ -597,7 +596,6 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
             **risk,
         }
         sig_id = bdb.create_signal(sig_data)
-
         try:
             from backend.src.services.market.macro_context import get_context as _get_ctx
             _market_ctx = _get_ctx()
@@ -646,6 +644,8 @@ class BreakoutEngine(_ManagementMixin, _VelocityMixin, _LiveExecuteMixin, _Learn
                 log_entry["ml_prob"] = round(ml_pred, 4)
                 _log.debug("[BO-Engine] ML predicted R=%.3f", ml_pred)
 
+        from backend.src.services.market import entry_contract
+        entry_contract.observe(bdb, "breakout", signal_ref, "creation", {"signal": sig_data, "candidate": candidate, "feature_names": bo_ml.FEATURE_NAMES, "indicator_contract": "breakout-proxies-v1"}, ml_features or [], source="Breakout Engine")
         log_entry.update({
             "result":         f"signal_created:{signal_ref}",
             "claude_decision": review["rationale"],

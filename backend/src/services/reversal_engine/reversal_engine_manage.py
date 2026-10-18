@@ -23,7 +23,8 @@ _LIVE_MISSING_THRESHOLD = 3   # consecutive get_positions() misses before treati
 # Lot size for virtual P&L tracking (not live yet)
 _VIRTUAL_LOT = 0.1
 
-# GD2/Institutional signals are identified by source_channel, not strategy --
+# Unicorn signals use stable level_type; source_channel is a legacy fallback.
+# Strategy cannot identify them --
 # sig["strategy"] is overwritten with whatever real STRATEGY_* the "Reversal Engine
 # Engine" channel override (or the global default) currently resolves to
 # (see reversal_engine_service._run_cycle: `sig_data["strategy"] =
@@ -127,7 +128,8 @@ class _ManagementMixin:
             hold_hours = (time.time() - float(sig.get("trigger_time") or sig.get("created_at", time.time()))) / 3600.0
             spread = float(getattr(exit_tick, "spread", 0.0) or 0.0)
             costs = self._main_eng.calculate_fees(_VIRTUAL_LOT, spread, hold_hours)
-            net = gross - costs["total_cost"]
+            # The two executable prices already paid the spread.
+            net = gross - max(0.0, costs["total_cost"] - costs.get("spread_cost", 0.0))
             return round(gross, 4), round(net, 4)
         except Exception:
             return gross, gross
@@ -142,7 +144,7 @@ class _ManagementMixin:
         STRATEGY_* is actually configured for the "Reversal Engine" channel
         (see _active_strategy) so the ML labels reflect what a real trade
         under that setting would have done."""
-        if sig.get("source_channel") == _GD2_SOURCE_CHANNEL:
+        if sig.get("level_type") == "unicorn" or sig.get("source_channel") == _GD2_SOURCE_CHANNEL:
             await self._manage_gd2_signal(sig, tick)
         elif sig.get("strategy") == STRATEGY_CONSERVATIVE:
             await self._manage_conservative_signal(sig, tick)
@@ -183,7 +185,7 @@ class _ManagementMixin:
         entry_ref = float(sig.get("trigger_price") or entry_mid)  # realistic fill once triggered
         remaining = float(sig.get("remaining_frac") if sig.get("remaining_frac") is not None else 1.0)
         partial_booked = float(sig.get("partial_pnl_dollars") or 0.0)
-        price = float(tick.mid or tick.bid or 0)
+        price = self._realistic_fill(tick, direction, closing=True)
 
         # How far this signal actually travelled each way, recorded while it is
         # live because nothing else captures it: max_tp_hit only says which
@@ -355,7 +357,7 @@ class _ManagementMixin:
         entry_ref  = float(sig.get("trigger_price") or entry_mid)
         remaining  = float(sig.get("remaining_frac") if sig.get("remaining_frac") is not None else 1.0)
         partial_booked = float(sig.get("partial_pnl_dollars") or 0.0)
-        price      = float(tick.mid or tick.bid or 0)
+        price      = self._realistic_fill(tick, direction, closing=True)
         sign       = 1.0 if direction == "BUY" else -1.0
 
         fixed_sl  = entry_ref - sign * _CONSERVATIVE_SL_PTS
@@ -447,7 +449,9 @@ class _ManagementMixin:
         # Runner phase: trail 3pts behind price, never loosening, floored at
         # the breakeven level move_sl_to_be already set above.
         current_sl = float(sig["stop_loss"])
-        candidate_sl = price - sign * _CONSERVATIVE_TRAIL_PTS
+        # Preserve the strategy's midpoint trail anchor; only the executable
+        # bid/ask decides whether an existing barrier has actually been hit.
+        candidate_sl = float(tick.mid or tick.bid or 0) - sign * _CONSERVATIVE_TRAIL_PTS
         new_sl = max(current_sl, candidate_sl) if direction == "BUY" else min(current_sl, candidate_sl)
         if new_sl != current_sl:
             re_db.set_stop_loss(sig_id, new_sl)

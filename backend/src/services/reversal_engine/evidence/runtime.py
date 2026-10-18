@@ -92,8 +92,18 @@ class Worker:
         now = time.time()
         # Closed trades with fully measured deal cashflows need no repeated broker request.
         tickets = {s.get("mt5_ticket") for s in signals}
-        recent = sorted((t for t in trades if t.get("mt5_ticket") in tickets and float(t.get("close_time") or now) >= now - 86400),
-                        key=lambda t: float(t.get("open_time") or 0), reverse=True)
+        # Cost incompleteness does not expire after a day. Rotate attempts so
+        # a persistent failure on the newest eight cannot starve older trades.
+        def needs_history(trade):
+            ticket = trade.get("mt5_ticket")
+            cached = self.deal_cache.get((env, ticket))
+            complete = (trade["status"] == "closed" and cached
+                        and observations.deals_complete(cached, trade.get("lot_size"))
+                        and observations.deal_net(cached) is not None)
+            return ticket in tickets and not complete and now - self.deal_attempt.get((env, ticket), 0) >= 600
+        recent = sorted((t for t in trades if needs_history(t)),
+                        key=lambda t: (self.deal_attempt.get((env, t["mt5_ticket"]), 0),
+                                       -float(t.get("open_time") or 0)))
         for trade in recent[:8]:
             ticket = trade["mt5_ticket"]
             cached = self.deal_cache.get((env, ticket))

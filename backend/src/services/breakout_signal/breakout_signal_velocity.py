@@ -16,6 +16,8 @@ import time
 
 from backend.src.services.breakout_signal import breakout_signal_repo as bdb
 from backend.src.services.breakout_signal import adaptive_params as ap
+from backend.src.services.breakout_signal import entry_safety
+from backend.src.services.market.entry_contract import age_refusal
 from backend.src.services.breakout_signal.signal_generator import (
     get_session,
     session_is_active,
@@ -47,7 +49,11 @@ class _VelocityMixin:
         level by > min_break_pts within the last 20 seconds, fire a break-and-go
         signal immediately without waiting for the next M5 candle close.
         """
-        cached = self._cached
+        if not await entry_safety.generation_permitted():
+            return
+        cached = dict(self._cached)
+        if age_refusal(cached.get("observed_at"), time.time(), 120):
+            return
         if not cached["key_levels"] or cached["adx"] <= 0:
             return
 
@@ -67,7 +73,8 @@ class _VelocityMixin:
 
         try:
             tick = await self._bridge.get_tick()
-            if not tick:
+            if (entry_safety.quote_problem(tick, ap.get("max_spread_pts"))
+                    or entry_safety.source_problem(tick, cached, time.time())):
                 return
         except Exception:
             return
@@ -89,7 +96,7 @@ class _VelocityMixin:
         atr          = cached["atr"]
         macd_hist    = cached["macd_hist"]
         key_levels   = cached["key_levels"]
-        min_break    = ap.get("min_break_pts")
+        min_break    = max(ap.get("min_break_pts"), atr * ap.get("min_break_atr_frac"))
         min_adx_go   = ap.get("min_adx_go")
         dual_bias    = ap.get("require_dual_bias") >= 0.5
 
@@ -151,7 +158,7 @@ class _VelocityMixin:
                     "trigger":   "velocity",
                 }
                 await self._process_candidate(
-                    candidate, context, {"ts": now}, atr, adx, velocity=True, tick=tick
+                    candidate, context, {"ts": now, "source_closed_at": cached.get("source_closed_at")}, atr, adx, velocity=True, tick=tick
                 )
                 return
 
@@ -196,6 +203,6 @@ class _VelocityMixin:
                     "trigger":   "velocity",
                 }
                 await self._process_candidate(
-                    candidate, context, {"ts": now}, atr, adx, velocity=True, tick=tick
+                    candidate, context, {"ts": now, "source_closed_at": cached.get("source_closed_at")}, atr, adx, velocity=True, tick=tick
                 )
                 return

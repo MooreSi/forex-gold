@@ -89,7 +89,7 @@ def legacy_label(outcome: str, rr_tp1) -> float:
 
 def realised_r(row: dict) -> Optional[float]:
     """Net dollars over the signal's own risk, or None when the row can't say."""
-    if row.get("live_exec_status") == "executed":
+    if row.get("live_exec_status") in ("executed", "success") or row.get("mt5_ticket"):
         return None
     try:
         lot = float(row.get("lot_size") or DEFAULT_LOT)

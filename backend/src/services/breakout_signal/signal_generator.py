@@ -317,9 +317,12 @@ def check_breakout_retest(
             break_idx = None
             for i, c in enumerate(scan_window):
                 body = abs(float(c.get("close", 0) or 0) - float(c.get("open", 0) or 0))
-                if (_body_beyond_level(c, level, "BUY") >= min_break
+                previous = scan_window[i - 1] if i else None
+                crossed = (float(c.get("open", level + 1)) <= level or
+                           (previous is not None and _candle_body_close(previous) <= level))
+                if (crossed and _body_beyond_level(c, level, "BUY") >= min_break
                         and body >= atr * 0.5):
-                    break_idx = i   # keep last (most recent) qualifying break
+                    break_idx = i
             if break_idx is not None:
                 # 2. First-pullback-only: count how many candles AFTER the break
                 #    (excluding the current rejection candle) already dipped into
@@ -351,6 +354,9 @@ def check_breakout_retest(
                         "broken_level_type": ltype,
                         "level_strength":   strength,
                         "prior_break_candles": 1,
+                        "break_event": {"origin_ts": scan_window[break_idx].get("ts"),
+                            "level": level, "prior_touches": prior_touches,
+                            "acceptance": "impulsive close beyond level", "invalidation": "return through level"},
                     }
 
         # ── SELL retest ──────────────────────────────────────────────────────
@@ -360,7 +366,10 @@ def check_breakout_retest(
             break_idx = None
             for i, c in enumerate(scan_window):
                 body = abs(float(c.get("close", 0) or 0) - float(c.get("open", 0) or 0))
-                if (_body_beyond_level(c, level, "SELL") >= min_break
+                previous = scan_window[i - 1] if i else None
+                crossed = (float(c.get("open", level - 1)) >= level or
+                           (previous is not None and _candle_body_close(previous) >= level))
+                if (crossed and _body_beyond_level(c, level, "SELL") >= min_break
                         and body >= atr * 0.5):
                     break_idx = i
             if break_idx is not None:
@@ -387,6 +396,9 @@ def check_breakout_retest(
                         "broken_level_type": ltype,
                         "level_strength":   strength,
                         "prior_break_candles": 1,
+                        "break_event": {"origin_ts": scan_window[break_idx].get("ts"),
+                            "level": level, "prior_touches": prior_touches,
+                            "acceptance": "impulsive close beyond level", "invalidation": "return through level"},
                     }
     return None
 

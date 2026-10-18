@@ -10,6 +10,13 @@
   ],
   "allowed": [
     {
+      "module": "backend.src.services.backtest.entry_trials",
+      "file": "backend/src/services/backtest/entry_trials.py",
+      "loc": 224,
+      "class": "unwired-tool",
+      "reason": "Owner-approved offline signal-entry experiments, invoked by tools/signal_entry_research.py only. Intentionally outside the app and order paths; protocol and input schema live in docs/system/domains/engines/entry-research.md. Covered by tests/backtest/test_entry_trials.py and test_entry_research_cli.py. Remove this entry if wired or removed."
+    },
+    {
       "module": "backend.src.services.broker.fake_bridge",
       "file": "backend/src/services/broker/fake_bridge.py",
       "loc": 316,

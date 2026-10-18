@@ -88,11 +88,13 @@ class TestTheLiquidityGate:
 class TestTheEntryTrigger:
     def _rejecting_candles(self):
         # Wicks below 3300 and closes back above it.
-        return [{"ts": 1, "open": 3301, "high": 3302, "low": 3297, "close": 3301}]
+        return [{"ts": 1, "open": 3301, "high": 3302, "low": 3297, "close": 3301},
+                {"ts": 61, "open": 3301, "high": 3302, "low": 3301, "close": 3301}]
 
     def _failing_candles(self):
         # Never traded through the level at all.
-        return [{"ts": 1, "open": 3305, "high": 3306, "low": 3303, "close": 3305}]
+        return [{"ts": 1, "open": 3305, "high": 3306, "low": 3303, "close": 3305},
+                {"ts": 61, "open": 3305, "high": 3306, "low": 3303, "close": 3305}]
 
     def test_off_by_default_no_candles_are_even_fetched(self, monkeypatch,
                                                         statuses, clear_path):

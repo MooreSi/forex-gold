@@ -104,8 +104,9 @@ recorded candles against the live strategy management rules.
 ```
 - Reversal correlation is **asymmetric on purpose**: our signals fire as price *approaches* a level, the REF channel posts when it *arrives*, so legitimate matches lead by 10–30 minutes. The old symmetric ±300s window failed 498 of 511 matches. `correlation_time_delta_s` is signed: negative = we fired first (good).
 - Reversal session is 04:00–16:00 UTC, measured from 591 real REF signals. Asia range is a *level source*, not a trading session. Signal expiry is 2 hours.
-- Known bug class in `reversal_engine_manage.py`: `sig["strategy"]` overwritten after `build_signal()` tagged it `"gd2_unicorn"`, so GD2 signals silently fell through to the REF 8-level ladder branch.
-- `breakout_signal_repo.py` **deliberately preserves** a known `close_signal` balance double-counting bug (proven by characterization test) — the port's scope was no-behaviour-change.
+- Unicorn exit routing uses immutable `level_type=unicorn` (18 October 2026); the old channel display name is only a legacy fallback. Selected strategy names cannot identify the setup family.
+- Breakout's former partial-profit balance double count was fixed with owner approval on 18 October 2026. Final close credits only unbooked net; repeated close is idempotent. The obsolete characterization expectation was replaced with approval.
+- The [entry correctness contract and offline research protocol](entry-research.md) document the 18 October signal review implementation, label versions and outstanding demo verification. Correctness is not evidence of profitability.
 - Breakout ADX thresholds were rebuilt 2026-07-16 after a ratchet forced every entry into late trends (the 40+ bucket lost $1,258 over 191 trades); floor lowered to 28 go / 24 retest, lateness moved to `max_adx_entry` + `require_adx_rising`.
 - `breakout_signal/backtest.py` exists because nightly AI tuning on small recent samples once ratcheted the engine into a losing configuration with no counterfactual check. It omits news windows, spread gate, Claude review and the ML gate — all only *remove* trades, so live selectivity ≥ backtest selectivity.
 - Backtest intrabar tie-break is conservative: SL fills before TP within the same M1 bar. Max hold 96 bars, lots clamped 0.01–5.0, $100/point/lot.
@@ -175,7 +176,6 @@ recorded candles against the live strategy management rules.
 ## Open questions
 
 - Database consolidation across engines (QUESTIONS.md #6) — the raw-sqlite3 cross-engine read is "worth a future pack" once revisited.
-- Whether the preserved breakout balance double-counting bug should now be fixed.
 
 ## Reversal engine: the 2026-09-11 capability build
 

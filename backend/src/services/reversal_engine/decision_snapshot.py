@@ -35,7 +35,10 @@ def _valid_features(features):
 
 def _policy(strategy):
     from backend.src.services.broker import ea_templates as et
-    policy = {"strategy": strategy, "template": None}
+    policy = {"strategy": strategy, "template": None,
+              "virtual_label_version": "executable-quotes-v2",
+              "virtual_management": "setup family before display name; midpoint trail anchor",
+              "costs": "executable prices plus incremental fees"}
     if et.is_template_override(strategy or ""):
         policy["template"] = et.get_ea_template(et.template_name_from_override(strategy))
         policy["status"] = "observed" if policy["template"] else "unavailable"

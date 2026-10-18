@@ -2,15 +2,10 @@
 DbAdapter (backend.src.db) instead of raw sqlite3 -- see
 docs/todo/refactor/breakout-signal-migration/020-*.md.
 
-Structural port of breakout_signal/database.py: same tables (bo_ prefix),
-same function signatures, same behavior -- proven by running
-tests/breakout_signal/test_database_characterization.py against this module
-unmodified, INCLUDING the known close_signal balance double-counting bug
-(see that test file's docstring) -- deliberately preserved here, not fixed,
-per this task's no-behavior-change scope. The one deliberate behavior
-change: close_signal() and book_partial_close() wrap their multi-statement
-writes in a single get_db().transaction(), instead of database.py's several
-independent connections for what should be one atomic operation.
+The structural port preserved the original behaviour, including its balance
+double-counting defect. The owner's 18 October 2026 correctness fix credits
+only the unbooked final cashflow and makes repeated closes idempotent.
+Multi-statement writes remain in a single transaction.
 """
 from __future__ import annotations
 
@@ -281,13 +276,10 @@ def close_signal(
     net_pnl_pts: float | None = None,
     net_pnl_dollars: float | None = None,
 ) -> None:
-    """Preserves database.py's exact behavior, INCLUDING the known
-    double-counting bug when a prior partial was booked -- see the module
-    docstring and tests/breakout_signal/test_database_characterization.py.
-    Not fixed here; wrapped in a transaction for atomicity only."""
+    """Store total trade P&L; credit only the remainder not already banked."""
     with get_db().transaction():
         sig = get_signal_by_id(signal_id)
-        if not sig:
+        if not sig or sig.get("status") == "closed":
             return
 
         entry = float(sig["entry_mid"])
@@ -297,7 +289,7 @@ def close_signal(
         raw_pts  = (close_price - entry) if direction == "BUY" else (entry - close_price)
         pnl_pts  = round(raw_pts, 2)
         pnl_dol  = round(pnl_pts * lot * 100.0, 2)
-        balance_delta = net_pnl_dollars if net_pnl_dollars is not None else pnl_dol
+        balance_delta = (net_pnl_dollars if net_pnl_dollars is not None else pnl_dol) - float(sig.get("partial_pnl_dollars") or 0)
         if net_pnl_dollars is not None:
             pnl_dol = net_pnl_dollars
         if net_pnl_pts is not None:

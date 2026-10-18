@@ -74,14 +74,10 @@ def test_close_and_learn_no_partial_matches_close_signal_direct(engine, fresh_db
     assert fresh_db.get_virtual_balance() == 1096.50
 
 
-def test_close_and_learn_with_prior_partial_double_counts_the_partial(engine, fresh_db):
-    """Documents the real bug found while characterizing this module (see
-    test_database_characterization.py's full-lifecycle test): when a
-    partial was already booked, _close_and_learn computes net_dol as
-    partial_booked + leg_net_dol, and close_signal applies that FULL value
-    as the balance delta -- even though partial_booked was already applied
-    to the balance when book_partial_close ran. The balance ends up higher
-    than the economically correct result.
+def test_close_and_learn_with_prior_partial_credits_each_cashflow_once(engine, fresh_db):
+    """Owner approved replacing the legacy bug expectation, 18 October 2026.
+
+    The stored total includes the partial, but the balance already banked it.
     """
     sig_id = fresh_db.create_signal(_sig(entry_mid=2400.0))
     fresh_db.trigger_signal(sig_id, 2401.0)
@@ -97,10 +93,6 @@ def test_close_and_learn_with_prior_partial_double_counts_the_partial(engine, fr
     # leg: remaining_frac=0.67, raw 10pts - 0.35 cost = 9.65 * 0.10 * 0.67 * 100 = $64.66
     # net_dol stored = partial_booked (15.0) + leg (64.66) = $79.66 (economically correct total)
     assert row["net_pnl_dollars"] == 79.66
-    # but the balance got the partial(15) applied TWICE: once at book_partial_close,
-    # once again inside close_signal's balance_delta=net_pnl_dollars=79.66
-    # 1015 (after partial) + 79.66 = 1094.66, NOT 1000 + 79.66 = 1079.66
-    assert fresh_db.get_virtual_balance() == 1094.66
+    assert fresh_db.get_virtual_balance() == 1079.66
     economically_correct_balance = 1000.0 + row["net_pnl_dollars"]
-    assert fresh_db.get_virtual_balance() != economically_correct_balance
-    assert fresh_db.get_virtual_balance() - economically_correct_balance == 15.0  # = partial_booked, double-counted
+    assert fresh_db.get_virtual_balance() == economically_correct_balance

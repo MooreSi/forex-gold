@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,7 @@ from backend.src.services.trend_pa import outcome as oc
 from backend.src.services.trend_pa import repo
 from backend.src.services.trend_pa import stats as ss
 from backend.src.services.trend_pa import strategy as st
+from backend.src.services.market import entry_contract as contract
 
 log = logging.getLogger("trend_pa")
 
@@ -198,15 +200,29 @@ class TrendPAEngine:
         close_at = float(bar_ts) + bt.M15_S - broker_offset(forming["M15"]["ts"], now)
         if (repo.last_signal_time(setup.direction) or 0) >= close_at:
             return                        # this bar has already been traded
-        await self._open(setup, created_at=max(time.time(), close_at))
+        await self._open(setup, created_at=max(time.time(), close_at), source_closed_at=close_at)
 
-    async def _open(self, setup: st.Setup, created_at: float) -> None:
+    async def _open(self, setup: st.Setup, created_at: float, source_closed_at=None) -> None:
         tick = await self._bridge.get_tick()
         if not tick:
+            return
+        quote_problem = (contract.quote_refusal(tick.bid, tick.ask)
+                         or contract.broker_quote_refusal(tick, time.time()))
+        if source_closed_at is not None and getattr(tick, "timestamp", None) is not None:
+            quote_problem = quote_problem or contract.age_refusal(source_closed_at, time.time(), bt.M15_S)
+        if quote_problem:
+            repo.log_analysis(quote_problem)
             return
         buy = setup.direction == "BUY"
         entry = float(tick.ask if buy else tick.bid)
         risk = (entry - setup.stop_loss) if buy else (setup.stop_loss - entry)
+        beyond = (entry - setup.level) if buy else (setup.level - entry)
+        if not all(math.isfinite(v) for v in (entry, risk, beyond, setup.atr_m15)) or setup.atr_m15 <= 0:
+            repo.log_analysis("invalid executable quote or volatility")
+            return
+        if beyond > st.DEFAULTS["max_chase_atr"] * setup.atr_m15:
+            repo.log_analysis(f"executable fill {beyond / setup.atr_m15:.2f}x ATR past the level -- chasing")
+            return
         if risk <= 0 or risk > st.DEFAULTS["max_sl_atr"] * setup.atr_m15:
             repo.log_analysis(f"{setup.pattern} lost to the spread: stop {risk:.2f} from the fill")
             return
@@ -218,9 +234,18 @@ class TrendPAEngine:
             "take_profit": entry + rr * risk if buy else entry - rr * risk,
             "risk": risk, "atr_m15": setup.atr_m15,
             "spread": float(tick.ask) - float(tick.bid),
-            "features": setup.features, "ml_prob": self.model.predict(setup.features),
+            "source_closed_at": source_closed_at, "quote_timestamp": getattr(tick, "timestamp", None),
+            "features": {**setup.features, "risk_atr": risk / setup.atr_m15,
+                         "level_dist_atr": beyond / setup.atr_m15},
         }
+        sig["ml_prob"] = self.model.predict(sig["features"])
         sig_id = repo.insert_signal(sig)
+        policy = {"strategy": "trend_pa_virtual", "rules": st.DEFAULTS,
+                  "costs": "executable prices; no separate spread charge"}
+        contract.observe(repo, "trend_pa", f"TPA-{sig_id:04d}", "creation", {"entry": setup.entry},
+                         setup.features, source="Trend PA Engine", policy=policy)
+        contract.observe(repo, "trend_pa", f"TPA-{sig_id:04d}", "fill", sig,
+                         sig["features"], source="Trend PA Engine", policy=policy)
         self.status_detail = f"{setup.direction} {setup.pattern} at {entry:.2f}"
         log.info("[TPA] TPA-%04d %s %s entry=%.2f sl=%.2f tp=%.2f", sig_id,
                  setup.direction, setup.pattern, entry, sig["stop_loss"], sig["take_profit"])

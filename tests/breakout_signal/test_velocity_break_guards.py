@@ -63,6 +63,8 @@ _PARAMS = {
     "max_adx_entry": 50.0,
     "require_dual_bias": 0.0,
     "compression_max_range_atr": 1.0,
+    "max_spread_pts": 2.0,
+    "min_break_atr_frac": .1,
 }
 
 _CACHED = {
@@ -98,6 +100,16 @@ def lab(monkeypatch):
         "tick": _Tick(4002.5, 4003.5),
         "history": list(_HISTORY),
     }
+    # A successful cycle supplies an availability stamp. These tests isolate
+    # price guards with both external generation permissions allowed.
+    from backend.src.db import database
+    from backend.src.services.cluster import node_roles
+    monkeypatch.setattr(node_roles, "engines_generate_here", lambda: True)
+    monkeypatch.setattr(database, "is_session_allowed", lambda: (True, "london"))
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(database, "to_db_thread", inline)
+    state["cached"]["observed_at"] = _NOW
 
     monkeypatch.setattr(vel.ap, "get", lambda key: state["params"][key])
     monkeypatch.setattr(vel.bdb, "get_open_signals", lambda: state["open_signals"])

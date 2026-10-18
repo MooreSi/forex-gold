@@ -73,11 +73,10 @@ class _ManagementMixin:
         lot: float,
         cost_pts: float,
     ) -> None:
-        """Close a signal, compute net P&L, record ML outcome, trigger batch
-        analysis. NOTE: preserves the known close_signal balance
-        double-counting bug (see breakout_signal_repo.py's module
-        docstring) -- not fixed here, this is a structural extraction."""
+        """Close with total trade net; the repo credits the unbooked remainder."""
         sig             = bdb.get_signal_by_id(sig_id)
+        if sig and sig.get("status") == "closed":
+            return
         remaining_frac  = float(sig.get("remaining_frac") if sig and sig.get("remaining_frac") is not None else 1.0)
         partial_booked  = float(sig.get("partial_pnl_dollars") or 0.0) if sig else 0.0
 

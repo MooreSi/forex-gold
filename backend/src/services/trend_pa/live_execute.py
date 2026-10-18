@@ -27,6 +27,7 @@ import logging
 from backend.src.services.trend_pa import ml
 from backend.src.services.trend_pa import repo
 from backend.src.services.trend_pa import strategy as st
+from backend.src.services.market import entry_contract as contract
 
 log = logging.getLogger("trend_pa")
 
@@ -54,7 +55,8 @@ async def execute(engine, sig: dict, tick) -> None:
     if main is None:
         repo.update_live_exec(sid, "skipped:no_main_engine")
         return
-    if not _strategy():
+    strategy = _strategy()
+    if not strategy:
         log.info("[TPA-Live] %s skipped -- no strategy chosen for %s", ref, SOURCE_NAME)
         repo.update_live_exec(sid, "skipped:no_strategy")
         return
@@ -62,6 +64,8 @@ async def execute(engine, sig: dict, tick) -> None:
     if not ok:
         repo.update_live_exec(sid, f"skipped:schedule:{why}"[:200])
         return
+    contract.observe(repo, "trend_pa", ref, "dispatch", sig, sig.get("features") or {},
+                     source=SOURCE_NAME, strategy=strategy)
     p = engine.model.predict(sig.get("features") or {})
     if not ml.gate_passes(p, rr=st.DEFAULTS["rr"], cost_r=0.0):
         repo.update_live_exec(sid, f"skipped:ML p(win)={p:.2f} expects a loss at 1:{st.DEFAULTS['rr']:g}")
@@ -79,6 +83,8 @@ async def execute(engine, sig: dict, tick) -> None:
         )
         vsid = made["signal_id"]
         result = await main.open_trade_from_signal(vsid, tick=tick)
+        contract.observe(repo, "trend_pa", ref, "broker_result", {"signal": sig, "result": result}, {},
+                         source=SOURCE_NAME, strategy=strategy)
         repo.update_live_exec(sid, "success", mt5_ticket=result.get("mt5_ticket"),
                               vantage_signal_id=vsid)
         log.info("[TPA-Live] %s opened ticket=%s", ref, result.get("mt5_ticket"))

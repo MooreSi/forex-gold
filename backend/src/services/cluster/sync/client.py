@@ -1,8 +1,8 @@
 """
 Sync client — runs on the Mac, connects out to the VPS's fixed IP.
 
-Handles reconnect with backoff, mirrors the VPS's authoritative settings
-into the local DB, surfaces VPS status for the Remote-mode dashboard, and
+Handles reconnect with backoff, keeps this node's settings authoritative on
+every connect (_reconnect_baseline.py) and mirrors the rest of the VPS's state, surfaces VPS status for the Remote-mode dashboard, and
 drives the STAND_DOWN/RESUME handshake behind the Local/Remote toggle.
 
 Nothing here ever runs on its own — it is only active once the user has
@@ -20,6 +20,7 @@ from backend.src.db import database as db_module
 from backend.src.services.cluster.sync import tls_util, _ea_templates_sync, _channel_setup_sync, _remote_close_sync, _remote_resume_sync, _peer_report_sync
 from backend.src.services.cluster.sync._pending_store import PendingStoreMixin
 from backend.src.services.cluster.sync._peer_data import PeerDataMixin
+from backend.src.services.cluster.sync._reconnect_baseline import ClientBaselineMixin
 from backend.src.services.cluster.sync._expert_params_sync import ClientExpertParamsMixin
 from backend.src.services.cluster.sync._latency_sync import ClientLatencyMixin
 from backend.src.services.cluster.sync._mt5_accounts_sync import ClientMt5AccountsMixin, _alert as _alert_operator
@@ -65,7 +66,7 @@ _LEDGER_PULL_INTERVAL_S = 120
 _LIVENESS_PING_INTERVAL_S = 20
 
 
-class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin, ClientMt5AccountsMixin,
+class SyncClient(PendingStoreMixin, PeerDataMixin, ClientBaselineMixin, ClientExpertParamsMixin, ClientMt5AccountsMixin,
                  ClientLatencyMixin, ClientRestartMixin, ClientUpdateMixin, ClientWriteOffMixin,
                  _ea_templates_sync.ClientEaTemplatesMixin, _channel_setup_sync.ClientChannelSetupMixin, _remote_close_sync.ClientRemoteCloseMixin, _remote_resume_sync.ClientRemoteResumeMixin, _peer_report_sync.ClientPeerReportMixin):
     def __init__(self):
@@ -231,15 +232,8 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientExpertParamsMixin, Clie
                 log.warning("[SyncClient] VPS rejected connection: %s", self.last_error)
                 return
             self.conn_state = CONN_CONNECTED
-            self.remote_settings = hello_reply.get("settings", {})
-            self._mirror_settings_locally(self.remote_settings)
-            self.remote_channel_strategy = hello_reply.get("channel_strategy", {})
-            self._mirror_channel_strategy_locally(self.remote_channel_strategy)
-            self.remote_trading_schedule = hello_reply.get("trading_schedule", {})
-            self._mirror_trading_schedule_locally(self.remote_trading_schedule)
-            self.remote_strategy_params = hello_reply.get("strategy_params", {})
-            self._mirror_strategy_params_locally(self.remote_strategy_params)
-            self._on_expert_params_state(hello_reply.get("expert_params"), connecting=True)
+            # This node's settings win; see _reconnect_baseline.py.
+            self._adopt_peer_state(hello_reply)
             log.info("[SyncClient] connected to VPS %s:%s", self._host, self._port)
 
             if self._pending_settings:

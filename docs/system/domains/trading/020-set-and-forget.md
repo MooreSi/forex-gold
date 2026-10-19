@@ -6,6 +6,13 @@ Covers `backend/src/services/setforget/`, `backend/src/controllers/setforget_con
 
 Added 2026-09-19 at the owner's request.
 
+**19 October 2026 review:** see [the implementation review and replay](021-setforget-review.md)
+for public creator/student research, observed rejection logs, corrections to
+closed-candle handling, recent AOI reactions, overlap merging, obstructed
+targets, AI evidence/stop validation and closed-market scanning. Its measured
+result remains negative without AI; earlier frequency/return claims below are
+historical, not validation of the current implementation.
+
 ## What it is
 
 A section of the Trading tab that reads gold top-down the way Alex G

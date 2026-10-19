@@ -124,9 +124,11 @@ def doji(c: dict) -> bool:
     return (body_high - body_low) / rng <= MAX_DOJI_BODY_FRACTION
 
 
-def confirmation(candles: list[dict]) -> Optional[dict]:
+def confirmation(candles: list[dict], *, closed: bool = False) -> Optional[dict]:
     """The pattern on the last CLOSED bar, or None.
 
+    `closed=True` means the caller already removed the forming candle. The
+    default accepts a live series, keeping the existing H4 callers' contract.
     The final candle of a live series is still being written -- its close is
     the current price and will move again before the bar ends -- so it is
     skipped. Confirming on a forming bar is confirming on nothing, and it is
@@ -144,9 +146,9 @@ def confirmation(candles: list[dict]) -> Optional[dict]:
     as continuation in the direction already in force -- which is why they are
     usable at all in a method whose first filter is the higher-timeframe bias.
     """
-    if len(candles) < 2:
+    if len(candles) < (1 if closed else 2):
         return None
-    idx = len(candles) - 2
+    idx = len(candles) - (1 if closed else 2)
     bar = candles[idx]
 
     kind, direction = None, None

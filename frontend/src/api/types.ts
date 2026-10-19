@@ -339,11 +339,14 @@ export interface SetForgetCandidate {
    *
    *   armed      the zone is chosen, price has not reached it
    *   waiting    price is at the zone, the 30m has not reacted yet
-   *   triggered  price is at the zone AND the 30m has shifted or engulfed
+   *   triggered  the 30m confirmed at, or just after a recent visit to, the zone
    */
   stage: "armed" | "waiting" | "triggered";
   /** What fired on the 30m, or null while armed or waiting. */
-  trigger: { kind: string; ts: number; level: number } | null;
+  trigger: { kind: string; ts: number; level: number;
+    zone_touch?: { ts: number; low: number; high: number } } | null;
+  target_basis?: "opposing_zone" | "risk_multiple";
+  structural_stop?: number;
   /** How far the entry is from the current price, in points. */
   distance: number;
   /**
@@ -380,6 +383,7 @@ export interface SetForgetEvidence {
   fib_levels: FibLevel[];
   impulse: { start: number; end: number } | null;
   confirmation: { kind: string; direction: string } | null;
+  trigger_last_closed?: number | null;
 }
 
 export interface SetForgetReview {

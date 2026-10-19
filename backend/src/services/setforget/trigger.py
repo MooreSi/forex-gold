@@ -40,7 +40,8 @@ def has_arrived(zone: Optional[dict], price: float, tolerance: float) -> bool:
     return aoi.distance(zone, price) <= tolerance
 
 
-def evaluate(candles: list[dict], direction: str) -> Optional[dict]:
+def evaluate(candles: list[dict], direction: str, *,
+             closed: bool = False) -> Optional[dict]:
     """What the 30m has done, or None if it has not done anything yet.
 
     A shift of structure outranks an engulfing when both are present. They are
@@ -56,17 +57,59 @@ def evaluate(candles: list[dict], direction: str) -> Optional[dict]:
 
     shift = structure.shift_of_structure(candles, direction)
     if shift:
+        bar = candles[shift["idx"]]
         return {"kind": "shift_of_structure", "ts": shift["ts"],
-                "level": shift["level"], "direction": direction}
+                "level": shift["level"], "direction": direction,
+                "low": bar["low"], "high": bar["high"]}
 
-    found = patterns.confirmation(candles)
+    found = patterns.confirmation(candles, closed=closed)
     if found and found.get("kind") == "engulfing":
         want = "bullish" if direction == "BUY" else "bearish"
         if found.get("direction") == want:
             return {"kind": "engulfing", "ts": found["ts"],
                     "level": found["low"] if direction == "BUY" else found["high"],
-                    "direction": direction}
+                    "direction": direction, "low": found["low"],
+                    "high": found["high"]}
     return None
+
+
+def reaction(candles: list[dict], direction: str, zone: dict,
+             price: float, max_distance: float, buffer: float) -> Optional[dict]:
+    """A recent, closed M30 reaction originating at this AOI.
+
+    A wick can visit the AOI and the confirmation close outside its arrival
+    band. Remember that visit for one H4 candle (eight M30 bars), bounded by
+    one H4 ATR of departure. The trigger keeps its existing three-bar recency
+    window. These are association bounds, not permission to chase a move.
+    A close through the distal edge plus stop buffer invalidates the visit.
+    """
+    if aoi.distance(zone, price) > max_distance:
+        return None
+    buy = direction == "BUY"
+    if (price < zone["low"] if buy else price > zone["high"]):
+        return None
+    fired = evaluate(candles, direction, closed=True)
+    if not fired:
+        return None
+    recent = candles[-8:]
+    touches = [i for i, c in enumerate(recent)
+               if c["ts"] <= fired["ts"] and c["low"] <= zone["high"]
+               and c["high"] >= zone["low"]]
+    if not touches:
+        return None
+    visit = touches[-1]
+    tail = recent[visit:]
+    if any((c["close"] < zone["low"] - buffer if buy
+            else c["close"] > zone["high"] + buffer) for c in tail):
+        return None
+    # A weekend/data gap must not turn eight old bars into a recent visit.
+    if candles[-1]["ts"] - recent[visit]["ts"] >= 8 * 1800:
+        return None
+    return {**fired, "low": min(c["low"] for c in tail),
+            "high": max(c["high"] for c in tail),
+            "zone_touch": {"ts": recent[visit]["ts"],
+                           "low": recent[visit]["low"],
+                           "high": recent[visit]["high"]}}
 
 
 def round_level(price: float, tolerance: float) -> Optional[float]:

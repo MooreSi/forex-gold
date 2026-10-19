@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from typing import Any, Optional
 
 from backend.src.services.ai import provider as _ai
+from backend.src.services.dpm import engine as _market
 from backend.src.services.positions import core_indicators as _ind
 from backend.src.services.reversal_engine import ict_patterns as _ict
 from backend.src.services.setforget import (
@@ -126,7 +128,9 @@ async def gather(engine: Any) -> dict:
     # The newest 30m bar is still forming; its "close" is the current price.
     # The trigger is a CLOSE through a swing, so it reads closed bars only
     # (2026-10-01) -- the same rule `patterns.confirmation` has always kept.
-    return evidence_from(daily, entry, trigger_candles[:-1])
+    evidence = evidence_from(daily, entry, trigger_candles[:-1])
+    evidence["market_closed"] = _market.is_weekly_market_closed()
+    return evidence
 
 
 def evidence_from(daily: list[dict], entry: list[dict],
@@ -150,17 +154,9 @@ def evidence_from(daily: list[dict], entry: list[dict],
     # a wait.
     daily_atr = _ict.atr(daily, ATR_PERIOD) if len(daily) > ATR_PERIOD else 0.0
 
-    # The major levels, marked on the HIGHER timeframes only and each found by
-    # scanning backward just far enough to validate it. The 4H does not mark
-    # levels: it is where execution happens, reacting to the ones the Daily
-    # and the Weekly have already established. A 4H that marked its own would
-    # put a level under every recent wick, which is the opposite of trading
-    # the majors.
-    #
-    # Weekly and Daily are scanned separately and then folded together on
-    # OVERLAP, because a weekly band and a daily band at the same price are
-    # one level a trader would draw once -- and a level both timeframes agree
-    # on is the strongest kind the method recognises.
+    # Each timeframe validates its own three-touch levels. Combine on overlap
+    # within the existing width rail: otherwise a chain across timeframes can
+    # erase every usable level when `within_width` rejects the combined band.
     # Levels where price TURNED, not merged candle bodies (2026-09-24): on gold
     # the body-merge never produced a band narrow enough to trade -- zero
     # candidates in a year of replay. See aoi.levels.
@@ -171,7 +167,8 @@ def evidence_from(daily: list[dict], entry: list[dict],
                                  if weekly and price else ([], 0))
     h4_zones = (aoi.mark(entry, price, cluster_width_pct=width)[0]
                 if ZONES_FROM_4H and entry and price else [])
-    zones = aoi.merge(daily_zones + weekly_zones + h4_zones)
+    zones = aoi.merge(daily_zones + weekly_zones + h4_zones,
+                      max_width=(price or 0) * aoi.MAX_ZONE_WIDTH_PCT)
     if len(zones) > aoi.DEFAULT_LIMIT:
         nearest = sorted(zones, key=lambda z: aoi.distance(z, price))
         zones = sorted(nearest[:aoi.DEFAULT_LIMIT], key=lambda z: z["low"])
@@ -207,6 +204,8 @@ def evidence_from(daily: list[dict], entry: list[dict],
         # because the direction it needs is derived there and deriving it twice
         # is how the two stages end up disagreeing about which way the trade is.
         "trigger_candles": trigger_candles,
+        "trigger_last_closed": (trigger_candles[-1]["ts"]
+                                if trigger_candles else None),
         "candles": entry,
         "weekly_candles": weekly,
         "daily_candles": daily,
@@ -234,6 +233,7 @@ def score(evidence: dict, candidate: Optional[dict]) -> dict:
         **evidence,
         "direction": (candidate or {}).get("direction", "BUY"),
         "at_zone": (candidate or {}).get("zone") if arrived else None,
+        "zone_visit": ((candidate or {}).get("trigger") or {}).get("zone_touch"),
     })
 
 
@@ -315,6 +315,9 @@ def scan(evidence: dict) -> tuple[Optional[dict], str, Optional[dict]]:
     plans the one price reaches first is the one worth watching, whichever way
     it points. `why` is "" when there is a best; otherwise both sides' reasons.
     """
+    if evidence.get("market_closed"):
+        return None, ("The market is closed. Waiting for fresh candles at the "
+                      "next session; the last signal is not sent for another AI review."), None
     if evidence.get("price") is None:
         return None, propose(evidence)[1], None
     weekly, daily = evidence.get("weekly_bias"), evidence.get("daily_bias")
@@ -388,7 +391,6 @@ def _build(evidence: dict, direction: str,
         if refusal:
             return None, refusal
 
-    stop = _stop_for(direction, zone, evidence, tol)
     target_zone = aoi.next_opposing(zones, entry, direction)
     if target_zone is None and TARGET_FALLBACK_R <= 0:
         return None, ("There is no opposing area of interest to take profit "
@@ -412,9 +414,19 @@ def _build(evidence: dict, direction: str,
     # unplaceable -- the same mechanism that refuses a thin ratio, so the
     # button is disabled with a reason rather than mysteriously.
     arrived = _trigger.has_arrived(zone, price, arrival)
-    fired = _trigger.evaluate(evidence.get("trigger_candles") or [], direction) \
-        if arrived else None
+    trigger_bars = evidence.get("trigger_candles") or []
+    fired = _trigger.reaction(trigger_bars, direction, zone, price, tol,
+                              tol * STOP_BUFFER_ATR)
+    if fired is None and arrived:
+        fired = _trigger.evaluate(trigger_bars, direction, closed=True)
     stage = "triggered" if fired else ("waiting" if arrived else "armed")
+
+    # For an associated reaction the M30 supplies the confirmation, not a H4
+    # pin bar up to four hours and many points away from this setup.
+    stop_evidence = {**evidence, "confirmation": {
+        **fired, "direction": "bullish" if direction == "BUY" else "bearish",
+    }} if fired and fired.get("zone_touch") else evidence
+    stop = _stop_for(direction, zone, stop_evidence, tol)
 
     if stage == "triggered":
         # The guide: "enter immediately after a signal candle closes". The
@@ -436,6 +448,8 @@ def _build(evidence: dict, direction: str,
     candidate["trigger"] = fired
     candidate["zone"] = zone
     candidate["target_zone"] = target_zone
+    candidate["target_basis"] = "opposing_zone" if target_zone else "risk_multiple"
+    candidate["structural_stop"] = stop
     _measure(candidate, price, evidence)
     return candidate, ""
 
@@ -537,6 +551,8 @@ def _review_levels(reply: dict, candidate: dict, price: float,
     levels = [reply.get("entry"), reply.get("stop_loss"), reply.get("take_profit")]
     if any(not isinstance(v, (int, float)) for v in levels):
         return None, []
+    if any(not math.isfinite(v) for v in levels):
+        return None, ["The model's prices must be finite numbers."]
 
     entry, stop, target = (float(v) for v in levels)
     revised = setup.build(
@@ -544,6 +560,19 @@ def _review_levels(reply: dict, candidate: dict, price: float,
         order_type=setup.order_type_for(candidate["direction"], entry, price, tol),
     )
     reasons = setup.invalidations(revised)
+    if (candidate.get("stage") == "triggered"
+            and candidate.get("order_type") == "market" and entry != price):
+        reasons.append("A triggered market entry must use the current price; "
+                       "moving it would misstate the trade's reward-to-risk.")
+    boundary = candidate.get("structural_stop")
+    if boundary is not None and (stop > boundary if candidate["direction"] == "BUY"
+                                 else stop < boundary):
+        reasons.append("The adjusted stop is inside the measured structural stop "
+                       "beyond the zone and confirmation tail.")
+    opposing = candidate.get("target_zone")
+    if opposing and (target > opposing["low"] if candidate["direction"] == "BUY"
+                     else target < opposing["high"]):
+        reasons.append("The adjusted target skips the nearest opposing zone.")
     if reasons:
         return None, reasons
     # After the check, not before: the stage is where price is relative to the
@@ -552,7 +581,7 @@ def _review_levels(reply: dict, candidate: dict, price: float,
     # has to travel -- `setup.invalidations` refuses an armed setup by reading
     # it, and without it (until 2026-09-25) a model's adjustment made a resting
     # plan placeable.
-    for key in ("stage", "trigger", "zone", "target_zone"):
+    for key in ("stage", "trigger", "zone", "target_zone", "target_basis", "structural_stop"):
         revised[key] = candidate.get(key)
     return revised, []
 

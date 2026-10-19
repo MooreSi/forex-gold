@@ -84,7 +84,8 @@ def _at_aoi(ev: dict, want: str) -> tuple[bool, str]:
         return False, (f"Price is at a {zone.get('kind')} zone. That is the wrong "
                        f"side of the market for this trade.")
     touches = int(zone.get("touches") or 1)
-    return True, (f"Price is at a {want_kind} zone "
+    location = "Price reacted at" if ev.get("zone_visit") else "Price is at"
+    return True, (f"{location} a {want_kind} zone "
                   f"{zone.get('low'):.2f}–{zone.get('high'):.2f}"
                   + (f", tested {touches} times." if touches > 1 else "."))
 

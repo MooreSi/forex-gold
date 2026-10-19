@@ -28,14 +28,25 @@ SYSTEM = (
     "2. Entries happen only at an Area of Interest -- a former swing point or "
     "consolidation acting as supply or demand -- in the direction of the "
     "higher-timeframe bias. Never mid-range.\n"
-    "3. The stop is structural: beyond the zone, or beyond the tail of the "
-    "confirmation candle. Never a round number of points.\n"
-    "4. The target is the next opposing Area of Interest, not a multiple of "
-    "the risk.\n"
+    "3. The stop is structural: beyond the zone AND the relevant confirmation "
+    "tail. The measured structural stop is the nearest permissible stop; "
+    "do not tighten it inside that boundary.\n"
+    "4. The target is the next opposing Area of Interest. If NO opposing "
+    "zone exists, the scanner's existing 3R fallback is permitted; this is a "
+    "risk projection, not a measured resistance/support level. Do not reject "
+    "that fallback merely because no opposing zone exists. Never ignore a "
+    "measured opposing zone to manufacture more reward.\n"
     "5. Minimum 1:2 reward-to-risk. Under that, there is no trade, however "
     "good the chart looks.\n"
-    "6. The order rests at the zone as a limit unless price is already there. "
-    "Chasing price away from a zone is not this method.\n\n"
+    "6. The scanner reports armed (awaiting price), waiting (awaiting a "
+    "closed 30m reaction), or triggered. Armed/waiting plans cannot be "
+    "executed. A triggered setup enters at market after a closed M30 shift "
+    "of structure or engulfing. A measured recent zone visit may precede "
+    "that close: confirmation can finish just outside the zone within the "
+    "scanner's bounded reaction distance. Judge the reported visit and "
+    "trigger, not an unrelated H4 candle. For a triggered market order keep "
+    "entry at the current quoted price; moving it cannot improve the actual "
+    "fill's ratio. No chasing a distant move.\n\n"
     "Answer with a single JSON object and nothing else -- no prose around it, "
     "no code fence. Keys:\n"
     '  "verdict": "take" | "adjust" | "skip"\n'
@@ -61,7 +72,8 @@ def _zone_lines(zones: list[dict], price: float) -> list[str]:
         return ["  (none found)"]
     out = []
     for z in sorted(zones, key=lambda z: z["low"], reverse=True):
-        where = "above" if z["low"] > price else "below"
+        where = ("above" if z["low"] > price else
+                 "below" if z["high"] < price else "contains")
         tested = f", tested {z['touches']}x" if z.get("touches", 1) > 1 else ""
         out.append(f"  {z['kind']:<7} {z['low']:.2f} – {z['high']:.2f}  "
                    f"({where} price{tested})")
@@ -111,13 +123,27 @@ def render(evidence: dict, candidate: dict) -> str:
         "",
         "Proposed from the rules:",
         f"  {candidate['direction']} as a {candidate['order_type']} order",
+        f"  Stage: {candidate.get('stage', 'unavailable')}",
         f"  Entry:  {candidate['entry']:.2f}",
         f"  Stop:   {candidate['stop_loss']:.2f}",
         f"  Target: {candidate['take_profit']:.2f}",
         f"  Reward-to-risk: 1:{candidate['rr']:.2f}"
         if candidate.get("rr") else "  Reward-to-risk: unmeasurable",
-        "",
-        "Judge this proposal against the rules. Answer with the JSON object "
-        "only.",
     ]
+    trigger = candidate.get("trigger") or {}
+    lines.append(f"  30m trigger: {trigger.get('kind', 'none')} "
+                 f"(bar timestamp {trigger.get('ts', 'unavailable')})")
+    visit = trigger.get("zone_touch")
+    if visit:
+        lines.append(f"  Zone visit: bar {visit['ts']}, range "
+                     f"{visit['low']:.2f}–{visit['high']:.2f}")
+    zone = candidate.get("zone")
+    if zone:
+        lines.append(f"  Entry AOI: {zone['kind']} {zone['low']:.2f}–{zone['high']:.2f}")
+    if candidate.get("structural_stop") is not None:
+        lines.append(f"  Measured structural stop: {candidate['structural_stop']:.2f}")
+    lines.append("  Target basis: " + (
+        "3R fallback; no opposing zone found" if candidate.get("target_basis") == "risk_multiple"
+        else "next opposing AOI"))
+    lines += ["", "Judge this proposal against the rules. Answer with the JSON object only."]
     return "\n".join(lines)

@@ -2,7 +2,7 @@ import {
   ArrowDownRight, ArrowUpRight, Clock, Crosshair, Eye, Zap,
 } from "lucide-react";
 import type { SetForgetCandidate, SetForgetEvidence } from "@/api/types";
-import { formatMoney, formatPrice } from "@/components/shared/format";
+import { formatBrokerTime, formatMoney, formatPrice } from "@/components/shared/format";
 import { isALongWait, waitFor } from "./waitFor";
 import { cn } from "@/lib/cn";
 
@@ -68,7 +68,7 @@ export function SetupSummarySection(props: SetupSummarySectionProps) {
         <span className="inline-flex items-center gap-1 rounded-full border border-line
                          bg-surface-2 px-2.5 py-1 text-[11px] text-ink-2">
           {resting ? <Clock size={12} /> : <Zap size={12} />}
-          {resting ? "Resting limit order" : "Market order"}
+          {resting ? (ready ? "Resting limit order" : "Watching the zone") : "Market order"}
         </span>
         {candidate.rr !== null && (
           <span
@@ -84,11 +84,36 @@ export function SetupSummarySection(props: SetupSummarySectionProps) {
 
       <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
         {resting
-          ? `The order waits at ${formatPrice(candidate.entry)} for price to come `
-            + "back to the zone. Nothing happens until it does — that is the "
-            + "set-and-forget part."
-          : "Price is already at the zone, so this fills now at the market."}
+          ? ready ? `The order waits at ${formatPrice(candidate.entry)} for price to return.`
+            : `Plan at ${formatPrice(candidate.entry)}. Price must arrive and `
+              + "the 30m must confirm before this plan can be placed."
+          : ready ? "This entry fills now at the market after a confirmed 30m reaction."
+            : "Price is near the zone. Waiting for a closed 30m confirmation."}
       </p>
+
+      {ready && candidate.trigger && (
+        <p className="mt-2 text-[11px] text-ink-2">
+          {`30m ${candidate.trigger.kind.replaceAll("_", " ")} confirmed · `}
+          {formatBrokerTime(candidate.trigger.ts + 1800)}
+          {candidate.trigger.zone_touch && (
+            <> · Zone tested {formatBrokerTime(candidate.trigger.zone_touch.ts)}</>
+          )}
+        </p>
+      )}
+      {!ready && evidence.trigger_last_closed !== undefined && (
+        <p className="mt-1 text-[11px] text-ink-3">
+          {evidence.trigger_last_closed === null ? "No closed 30m candles available."
+            : `Last 30m close checked: ${formatBrokerTime(evidence.trigger_last_closed + 1800)}`}
+        </p>
+      )}
+      {candidate.target_basis && (
+        <p className="mt-1 text-[11px] text-ink-3">
+          {candidate.target_basis === "risk_multiple"
+            ? `Target: ${candidate.rr == null ? "risk" : `${formatPrice(candidate.rr)}R`} `
+              + "projection; no opposing zone was found."
+            : "Target: nearest opposing area of interest."}
+        </p>
+      )}
 
       {resting && (
         /* How long the wait is, stated rather than left to be judged off the

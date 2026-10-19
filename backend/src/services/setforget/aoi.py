@@ -274,7 +274,8 @@ def _nearest_pair(found: list[dict], price: float) -> list[dict]:
     return sorted(out, key=lambda z: z["low"])
 
 
-def merge(raw: list[dict], gap: float = 0.0) -> list[dict]:
+def merge(raw: list[dict], gap: float = 0.0, *,
+          max_width: Optional[float] = None) -> list[dict]:
     """Fold nearby zones of the same kind into one, in price order.
 
     Two swing lows a tick apart are one area of interest. Left separate they
@@ -294,6 +295,11 @@ def merge(raw: list[dict], gap: float = 0.0) -> list[dict]:
     level, because the sweep compares against the band it is BUILDING rather
     than against the original it started from.
 
+    `max_width` caps a combined level when folding separate timeframes. An
+    overlap chain must not erase three usable levels by making one oversized
+    band which `within_width` subsequently drops. Default preserves body-zone
+    callers' original unbounded merge.
+
     The merged band keeps the MOST RECENT timestamp: it is one level, and the
     age shown beside it should be the last time price was there.
     """
@@ -301,7 +307,10 @@ def merge(raw: list[dict], gap: float = 0.0) -> list[dict]:
     for kind in ("demand", "supply"):
         group = sorted([z for z in raw if z["kind"] == kind], key=lambda z: z["low"])
         for zone in group:
-            if out and out[-1]["kind"] == kind and zone["low"] <= out[-1]["high"] + gap:
+            if (out and out[-1]["kind"] == kind
+                    and zone["low"] <= out[-1]["high"] + gap
+                    and (max_width is None or
+                         max(out[-1]["high"], zone["high"]) - out[-1]["low"] <= max_width)):
                 last = out[-1]
                 last["high"] = max(last["high"], zone["high"])
                 last["ts"] = max(last["ts"], zone["ts"])
@@ -350,13 +359,16 @@ def at_price(zones_: list[dict], price: float, kind: str,
 def next_opposing(zones_: list[dict], price: float, direction: str) -> Optional[dict]:
     """Where the trade takes profit: the next zone price would run INTO.
 
-    A long targets the nearest supply above, a short the nearest demand below.
+    A long targets the nearest supply ahead, a short the nearest demand below.
+    An opposing zone ALREADY containing entry is an obstruction too. Ignoring
+    it manufactures a healthy ratio to a distant level while trading directly
+    into supply/demand (observed in the 2026-10-18 AI rejection logs).
     A zone on the wrong side of price is not a target -- returning one would
     put the take-profit past the entry in the wrong direction and invert the
     trade, which reads as a perfectly plausible number on screen.
     """
     if direction.upper() == "BUY":
-        above = [z for z in zones_ if z["kind"] == "supply" and z["low"] > price]
+        above = [z for z in zones_ if z["kind"] == "supply" and z["high"] > price]
         return min(above, key=lambda z: z["low"]) if above else None
-    below = [z for z in zones_ if z["kind"] == "demand" and z["high"] < price]
+    below = [z for z in zones_ if z["kind"] == "demand" and z["low"] < price]
     return max(below, key=lambda z: z["high"]) if below else None

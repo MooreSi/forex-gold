@@ -21,9 +21,9 @@ const STEPS = [
   {
     icon: Layers,
     title: "Top-down, three timeframes",
-    body: "Weekly for the bias, Daily for the structure, 4H for the entry. "
-      + "If the Weekly and the Daily disagree, the pair is too noisy — skip it "
-      + "and wait. That one filter removes most trades, and it is meant to.",
+    body: "Weekly and Daily provide the main bias; the 4H refines structure "
+      + "and levels. The app watches both directions and the model checks whether "
+      + "a proposal agrees with the higher timeframes. Confirmation comes from the 30m.",
   },
   {
     icon: TrendingUp,
@@ -36,8 +36,9 @@ const STEPS = [
     icon: Crosshair,
     title: "Enter only at an Area of Interest",
     body: "A former swing point or consolidation acting as supply or demand. "
-      + "Price has to come to the zone — the order rests there and waits. "
-      + "Entering mid-range is not this method.",
+      + "Price visits the zone, then a closed 30m shift or engulfing confirms "
+      + "the reaction. A recent wick test can qualify even when confirmation "
+      + "closes just outside. A distant move is left alone.",
   },
   {
     icon: ShieldCheck,
@@ -48,17 +49,18 @@ const STEPS = [
   },
   {
     icon: Target,
-    title: "The target is the next zone",
-    body: "The opposing Area of Interest price would run into. The ratio comes "
-      + "out of that distance — it is not chosen first and the target reverse-"
-      + "engineered to fit it.",
+    title: "Target the next opposing zone",
+    body: "The opposing Area of Interest limits the available reward. If none "
+      + "exists, this app uses a 3R projection and labels it as such. An "
+      + "intervening zone is never skipped to improve the ratio.",
   },
   {
     icon: Ruler,
-    title: "1:2 minimum, 1-2% at risk",
+    title: "1:2 minimum, configured risk",
     body: "Under 1:2 there is no trade however good the chart looks. Position "
       + "size comes from the stop distance and a fixed percentage of the "
-      + "account, so every loss costs the same.",
+      + "account when risk sizing is selected. A fixed lot size changes the cash "
+      + "at risk with the stop distance; check that amount before placing.",
   },
 ];
 

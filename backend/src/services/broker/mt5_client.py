@@ -9,6 +9,7 @@ TCP handshake + client object setup overhead on every call.
 """
 
 import asyncio
+import json
 import logging
 import time
 from typing import Optional
@@ -109,11 +110,20 @@ _CLIENT_RECYCLE_THRESHOLD = 30
 # its caller gives up on it, the next ones (/tick_at too: same history)
 # return what a failure already returns, at once, for a pause that doubles while it keeps hanging.
 _TICKS_PAUSE_MIN_S = 300.0
-_TICKS_PAUSE_MAX_S = 3600.0
+# Each retry of a broken history is one ~65s stall: hourly meant a stall every
+# hour all night (2026-10-19/20), so it backs off to six hours.
+_TICKS_PAUSE_MAX_S = 6 * 3600.0
 _ticks_clock = time.monotonic
 # The freeze a hung read causes clears by itself in 60-70s (observed). The
 # watchdog and the self-healer wait this long after one before restarting.
 TICK_HANG_HOLD_S = 120.0
+
+
+def _tick_pause_file():
+    # Kept across app restarts: a fresh client used to pay a hung read on
+    # every start (2026-10-20). Lazy import: tests never touch the data dir.
+    from backend.src import config
+    return config.DATA_DIR / "tick_history_pause.json"
 
 
 class MT5BridgeClient:
@@ -122,10 +132,15 @@ class MT5BridgeClient:
     _ticks_pause_s = 0.0
     _ticks_hung_at: Optional[float] = None
 
-    def __init__(self, bridge_url: str):
+    _persist_tick_pause = False
+
+    def __init__(self, bridge_url: str, persist_tick_pause: bool = False):
         self._url  = bridge_url.rstrip("/") if bridge_url else ""
         self._http: Optional[httpx.AsyncClient] = None
         self._recycling = False
+        self._persist_tick_pause = persist_tick_pause
+        if persist_tick_pause:
+            self._load_tick_pause()
 
     @property
     def url(self) -> str:
@@ -337,7 +352,19 @@ class MT5BridgeClient:
             log.debug("bridge candles_range(%s) fetch failed: %s", symbol, e)
             return []
 
+    def _tick_read_lock(self) -> asyncio.Lock:
+        # One tick-history read in flight: four at app start queued in the
+        # bridge and froze it for four minutes (2026-10-20 06:57).
+        lock = self.__dict__.get("_ticks_lock")
+        if lock is None:
+            lock = self._ticks_lock = asyncio.Lock()
+        return lock
+
     async def get_ticks_range(self, from_ts: float, to_ts: float) -> list[dict]:
+        async with self._tick_read_lock():
+            return await self._get_ticks_range_now(from_ts, to_ts)
+
+    async def _get_ticks_range_now(self, from_ts: float, to_ts: float) -> list[dict]:
         """Fetch XAUUSD ticks between two Unix timestamps -- bounded to one
         day by the bridge itself (docs/todo/backtest/010 phase 1; a measured
         hour is 1.7-2.0MB, so a full range request is tens of MB).
@@ -368,7 +395,7 @@ class MT5BridgeClient:
                     "bridge to pick up the current mt5_bridge.py."
                 )
             r.raise_for_status()
-            self._ticks_pause_s = 0.0
+            self._tick_read_answered()
             return r.json().get("ticks", [])
         except RuntimeError:
             raise
@@ -393,6 +420,33 @@ class MT5BridgeClient:
         self._ticks_paused_until = self._ticks_hung_at + self._ticks_pause_s
         log.warning("bridge tick-range read hung (%s) -- pausing tick-range reads "
                     "for %ds so the bridge is not frozen again", why, self._ticks_pause_s)
+        if self._persist_tick_pause:
+            try:
+                _tick_pause_file().write_text(json.dumps({
+                    "paused_until": time.time() + self._ticks_pause_s,
+                    "pause_s": self._ticks_pause_s}))
+            except OSError as e:
+                log.debug("tick pause not saved: %s", e)
+
+    def _tick_read_answered(self) -> None:
+        self._ticks_pause_s = 0.0
+        if self._persist_tick_pause:
+            try:
+                _tick_pause_file().unlink(missing_ok=True)
+            except OSError as e:
+                log.debug("tick pause not cleared: %s", e)
+
+    def _load_tick_pause(self) -> None:
+        try:
+            saved = json.loads(_tick_pause_file().read_text())
+            left = float(saved["paused_until"]) - time.time()
+            self._ticks_pause_s = min(float(saved["pause_s"]), _TICKS_PAUSE_MAX_S)
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+        if left > 0:
+            self._ticks_paused_until = _ticks_clock() + min(left, _TICKS_PAUSE_MAX_S)
+            log.info("tick-range reads still paused for %ds after a hang before "
+                     "this start", left)
 
     # ── Account / positions ───────────────────────────────────────────────────
 
@@ -565,13 +619,18 @@ class MT5BridgeClient:
         return None
 
     async def get_tick_at(self, ts: float) -> Optional[dict]:
-        # Same tick history as /ticks (copy_ticks_from), so the same pause.
+        # Same tick history as /ticks (copy_ticks_from): same lock, same pause.
+        async with self._tick_read_lock():
+            return await self._get_tick_at_now(ts)
+
+    async def _get_tick_at_now(self, ts: float) -> Optional[dict]:
         if not self._url or _ticks_clock() < self._ticks_paused_until:
             return None
         try:
             r = await self._request("get", f"{self._url}/tick_at",
                                     timeout=8.0, params={"ts": ts})
             if r.status_code == 200:
+                self._tick_read_answered()
                 return r.json()
         except asyncio.CancelledError:
             self._pause_tick_reads("its caller gave up waiting")

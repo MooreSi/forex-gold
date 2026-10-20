@@ -191,7 +191,7 @@ def _make_bridge(config: dict):
     if _native_bridge_available() and config.get("mt5_native_bridge_enabled", True):
         log.info("Using NativeMT5Bridge (in-process, no HTTP bridge) — native Windows")
         return NativeMT5Bridge()
-    return MT5BridgeClient(config.get("mt5_bridge_url", ""))
+    return MT5BridgeClient(config.get("mt5_bridge_url", ""), persist_tick_pause=True)
 
 
 class TradingRuntime:

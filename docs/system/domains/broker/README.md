@@ -660,6 +660,15 @@ starts and logins, and no errors. The app was killing it, 46 times between
   `tests/broker/test_a_hung_tick_read_pauses_tick_reads.py`,
   `tests/core/test_bridge_restart_is_recorded.py` and
   `TestItDoesNotFightTheWatchdog`.
+- **App restarts needed a manual bridge restart (2026-10-20).** At 06:57 the
+  new app sent four tick-history reads together. In the bridge they queued
+  behind `_mt5_call_lock` and hung about 65s each, so the bridge was frozen
+  for over four minutes. A fresh client also started with no pause. Now one
+  tick-history read is in flight at a time (`_tick_read_lock`), and a
+  waiter re-checks the pause before sending. The runtime's client keeps the
+  pause in `DATA_DIR/tick_history_pause.json` across restarts, and the cap
+  is 6h instead of 1h. Overnight that meant a stall every hour; now it is
+  at most four a day while the history stays broken.
 - **Still open.** Why `copy_ticks_range` stopped answering after the
   access-point switch. Moving `202610.tkc` aside did not help (20:40). MT5 made
   a fresh 1.7KB file, the read still hung, and there was no network traffic,

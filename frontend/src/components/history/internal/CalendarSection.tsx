@@ -6,7 +6,9 @@ import { formatMoney, pnlColour } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
 import { useClosedTrades } from "../hooks/useClosedTrades";
 import { DayDetailDialog } from "./DayDetailDialog";
-import { monthGrid, rowDay, type DayCell } from "./calendarGrid";
+import {
+  dayGains, formatGain, monthGrid, periodGain, rowDay, type DayCell, type WeekRow,
+} from "./calendarGrid";
 
 /**
  * A month of closed trades, day by day.
@@ -41,13 +43,27 @@ function winRate(cell: DayCell): number {
   return cell.trades.length ? Math.round((wins / cell.trades.length) * 100) : 0;
 }
 
+/** A week's gain over its days in this month: the weekly total's own span. */
+function weekGain(rows: Parameters<typeof periodGain>[0], balance: number | null,
+                  week: WeekRow): number | null {
+  const own = week.days.filter((c) => c.inMonth);
+  if (!own.length) return null;
+  return periodGain(rows, balance, own[0]!.date, own[own.length - 1]!.date);
+}
+
 function monthLabel(year: number, month: number): string {
   return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-GB", {
     month: "long", year: "numeric", timeZone: "UTC",
   });
 }
 
-export function CalendarSection({ days }: { days: number }) {
+/**
+ * `balance` is the broker's balance now, for each day's % gain; null (or left
+ * out) when there is none, and the cells then show money only.
+ */
+export function CalendarSection({ days, balance = null }: {
+  days: number; balance?: number | null;
+}) {
   const poll = useClosedTrades(days);
   const [today, setToday] = useState<string | null>(null);
   const [open, setOpen] = useState<DayCell | null>(null);
@@ -77,6 +93,13 @@ export function CalendarSection({ days }: { days: number }) {
     () => (shown ? monthGrid(rows, shown.year, shown.month) : null),
     [rows, shown],
   );
+
+  const gains = useMemo(() => dayGains(rows, balance), [rows, balance]);
+  const monthGain = useMemo(() => {
+    if (!shown) return null;
+    const mm = String(shown.month).padStart(2, "0");
+    return periodGain(rows, balance, `${shown.year}-${mm}-01`, `${shown.year}-${mm}-31`);
+  }, [rows, balance, shown]);
 
   if (!poll.data) {
     return <EmptyState title={poll.error ? "Could not load the calendar" : "Loading"}
@@ -122,6 +145,12 @@ export function CalendarSection({ days }: { days: number }) {
           <span className={cn("font-semibold", pnlColour(grid.pnl))}>
             {formatMoney(grid.pnl)}
           </span>
+          {monthGain != null && (
+            <span data-testid="month-gain"
+              className={cn("ml-1 font-semibold", pnlColour(monthGain))}>
+              ({formatGain(monthGain)})
+            </span>
+          )}
         </span>
       </div>
 
@@ -142,7 +171,9 @@ export function CalendarSection({ days }: { days: number }) {
           Week
         </div>
 
-        {grid.weeks.map((week, wi) => (
+        {grid.weeks.map((week, wi) => {
+          const wGain = weekGain(rows, balance, week);
+          return (
           <div key={wi} className="contents">
             {week.days.map((cell) => {
               const traded = cell.trades.length > 0;
@@ -186,10 +217,19 @@ export function CalendarSection({ days }: { days: number }) {
                         pnlColour(cell.pnl))}>
                         {cellMoney(cell.pnl)}
                       </span>
-                      <span className="num block text-[10px] text-ink-3">
-                        {cell.trades.length}
-                        {cell.trades.length === 1 ? " trade" : " trades"}
-                      </span>
+                      <div className="flex items-baseline gap-1">
+                        <span className="num text-[10px] text-ink-3">
+                          {cell.trades.length}
+                          {cell.trades.length === 1 ? " trade" : " trades"}
+                        </span>
+                        {gains.has(cell.date) && (
+                          <span data-testid={`day-gain-${cell.date}`}
+                            className={cn("num ml-auto text-[10px] font-semibold",
+                              pnlColour(gains.get(cell.date)))}>
+                            {formatGain(gains.get(cell.date)!)}
+                          </span>
+                        )}
+                      </div>
                     </>
                   )}
                 </button>
@@ -202,17 +242,28 @@ export function CalendarSection({ days }: { days: number }) {
                 pnlColour(week.pnl))}>
                 {week.trades ? cellMoney(week.pnl) : "—"}
               </span>
-              <span className="num block text-[10px] text-ink-3">
-                {week.trades
-                  ? `${week.trades} ${week.trades === 1 ? "trade" : "trades"}`
-                  : "quiet"}
-              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="num text-[10px] text-ink-3">
+                  {week.trades
+                    ? `${week.trades} ${week.trades === 1 ? "trade" : "trades"}`
+                    : "quiet"}
+                </span>
+                {wGain != null && (
+                  <span data-testid={`week-gain-${wi}`}
+                    className={cn("num ml-auto text-[10px] font-semibold",
+                      pnlColour(wGain))}>
+                    {formatGain(wGain)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
-      <DayDetailDialog day={open} onClose={() => setOpen(null)} />
+      <DayDetailDialog day={open} gain={open ? gains.get(open.date) ?? null : null}
+        onClose={() => setOpen(null)} />
     </div>
   );
 }

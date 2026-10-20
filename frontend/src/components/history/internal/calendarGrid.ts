@@ -74,6 +74,60 @@ export function groupByDay(rows: TradeRow[]): Map<string, TradeRow[]> {
   return out;
 }
 
+/**
+ * Each traded day's gain, as a percent of the balance that day OPENED on.
+ *
+ * The opening balance is the balance now minus everything realised from that
+ * day on: the rule `risk/daily_goal.py` uses for today, walked back a day at
+ * a time, so the calendar's 1% and the daily goal's 1% are the same 1%.
+ * Deposits and withdrawals are not in the closed-trade rows, so a day before
+ * one is measured against a balance the account did not have. No balance
+ * gives no percentages at all, and a day whose opening balance comes out at
+ * or below zero is left out: a percentage of nothing is not a figure.
+ */
+export function dayGains(rows: TradeRow[], balance: number | null): Map<string, number> {
+  const out = new Map<string, number>();
+  if (balance == null || !Number.isFinite(balance)) return out;
+  const byDay = groupByDay(rows);
+  let after = 0;  // realised on the days later than the one being measured
+  for (const day of [...byDay.keys()].sort().reverse()) {
+    const pnl = byDay.get(day)!.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+    const open = balance - after - pnl;
+    if (open > 0) out.set(day, (pnl / open) * 100);
+    after += pnl;
+  }
+  return out;
+}
+
+/**
+ * A run of days' gain (a week, a month), as a percent of the balance the run
+ * OPENED on: its realised P&L over `balance - everything realised from
+ * `from` on`. Not the sum of the days' percentages, which are each of a
+ * different balance. `from` and `to` are ISO dates, inclusive. Null with no
+ * balance, no trades in the run, or an opening balance at or below zero; the
+ * same deposit caveat as `dayGains` applies.
+ */
+export function periodGain(
+  rows: TradeRow[], balance: number | null, from: string, to: string,
+): number | null {
+  if (balance == null || !Number.isFinite(balance)) return null;
+  let pnl = 0;
+  let after = 0;
+  let n = 0;
+  for (const [day, trades] of groupByDay(rows)) {
+    const sum = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+    if (day > to) after += sum;
+    else if (day >= from) { pnl += sum; n += trades.length; }
+  }
+  const open = balance - after - pnl;
+  return n > 0 && open > 0 ? (pnl / open) * 100 : null;
+}
+
+/** "+1.25%" / "-0.40%": a day's gain, signed, to two places. */
+export function formatGain(pct: number): string {
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
 function iso(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }

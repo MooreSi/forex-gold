@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bySession, bySource, groupByDay, monthGrid, tradingDate } from "../internal/calendarGrid";
+import { bySession, bySource, dayGains, groupByDay, monthGrid, periodGain, tradingDate } from "../internal/calendarGrid";
 import type { TradeRow } from "../hooks/useClosedTrades";
 
 /**
@@ -213,5 +213,89 @@ describe("a day's breakdown", () => {
     // A trade opened by hand has no source, and leaving it out makes the
     // day's rows disagree with the day's total.
     expect(bySource([row({ source: "", pnl: 5 })])[0]!.source).toBe("unattributed");
+  });
+});
+
+/**
+ * A day's % gain is of that day's OPENING balance: the balance now, minus
+ * everything realised from that day on. The same rule the daily goal uses
+ * (`risk/daily_goal.py`), so the calendar's "+1%" and the goal's "1%" are
+ * the same one percent.
+ */
+describe("dayGains", () => {
+  it("measures each day against the balance it opened on", () => {
+    // Balance now 1100. The 16th made +50, so it opened on 1050; the 15th
+    // made +50 before that, so it opened on 1000.
+    const gains = dayGains([
+      row({ ticket: 2, day: "2026-09-16", close_ts: 2, pnl: 50 }),
+      row({ ticket: 1, day: "2026-09-15", close_ts: 1, pnl: 50 }),
+    ], 1100);
+
+    expect(gains.get("2026-09-15")).toBeCloseTo(5, 6);
+    expect(gains.get("2026-09-16")).toBeCloseTo((50 / 1050) * 100, 6);
+  });
+
+  it("adds up every trade on the day, losers included", () => {
+    const gains = dayGains([
+      row({ ticket: 1, day: "2026-09-15", close_ts: 1, pnl: 80 }),
+      row({ ticket: 2, day: "2026-09-15", close_ts: 2, pnl: -30 }),
+    ], 1050);
+
+    expect(gains.get("2026-09-15")).toBeCloseTo(5, 6);
+  });
+
+  it("gives a losing day a negative gain", () => {
+    const gains = dayGains([row({ day: "2026-09-15", close_ts: 1, pnl: -50 })], 950);
+
+    expect(gains.get("2026-09-15")).toBeCloseTo(-5, 6);
+  });
+
+  it("gives nothing without a balance to measure against", () => {
+    // A percentage of a guessed balance is a wrong number that looks right.
+    expect(dayGains([row({ day: "2026-09-15", close_ts: 1, pnl: 50 })], null).size)
+      .toBe(0);
+  });
+
+  it("gives nothing for a day whose opening balance comes out at or below zero", () => {
+    // Only possible when deposits are missing from the arithmetic; a
+    // percentage of nothing would be infinite or flip sign.
+    expect(dayGains([row({ day: "2026-09-15", close_ts: 1, pnl: 500 })], 400).size)
+      .toBe(0);
+  });
+});
+
+/**
+ * A week's or a month's % gain is of the balance it OPENED on, not the sum of
+ * its days' percentages: +5% then +5% is 10.25% of the start, and summing
+ * day percentages measured against different balances gives neither.
+ */
+describe("periodGain", () => {
+  const rows = [
+    row({ ticket: 3, day: "2026-09-22", close_ts: 3, pnl: 40 }),
+    row({ ticket: 2, day: "2026-09-16", close_ts: 2, pnl: 52.5 }),
+    row({ ticket: 1, day: "2026-09-15", close_ts: 1, pnl: 50 }),
+  ];
+  // Balance now 1142.5: the 15th opened on 1000, the 16th on 1050.
+
+  it("measures the period against the balance it opened on", () => {
+    // 15th +5% of 1000, 16th +5% of 1050: 102.5 on 1000 is 10.25%, not 10%.
+    expect(periodGain(rows, 1142.5, "2026-09-14", "2026-09-20")).toBeCloseTo(10.25, 6);
+  });
+
+  it("leaves out trades after the period from the gain but not the balance", () => {
+    expect(periodGain(rows, 1142.5, "2026-09-21", "2026-09-27"))
+      .toBeCloseTo((40 / 1102.5) * 100, 6);
+  });
+
+  it("gives null for a period with no trades", () => {
+    expect(periodGain(rows, 1142.5, "2026-09-01", "2026-09-13")).toBeNull();
+  });
+
+  it("gives null without a balance", () => {
+    expect(periodGain(rows, null, "2026-09-14", "2026-09-20")).toBeNull();
+  });
+
+  it("gives null when the opening balance comes out at or below zero", () => {
+    expect(periodGain(rows, 100, "2026-09-14", "2026-09-20")).toBeNull();
   });
 });

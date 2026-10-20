@@ -113,7 +113,8 @@ export function HistoryPanel() {
             <Tabs.Content value="calendar">
               {/* Shares the trades poll with the curve and the table, so the
                   three cannot disagree about what a day earned. */}
-              <CalendarSection days={c.days} />
+              <CalendarSection days={c.days}
+                balance={accountBalance(c.state.data.performance)} />
             </Tabs.Content>
             <Tabs.Content value="hours">
               <HeatmapSection cells={c.hourly} />

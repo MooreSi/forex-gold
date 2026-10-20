@@ -1,7 +1,7 @@
 import { DialogShell } from "@/components/shared/DialogShell";
 import { formatBrokerTime, formatMoney, pnlColour } from "@/components/shared/format";
 import { cn } from "@/lib/cn";
-import { bySession, bySource, type DayCell, type Tally } from "./calendarGrid";
+import { bySession, bySource, formatGain, type DayCell, type Tally } from "./calendarGrid";
 
 /**
  * One day, opened from the calendar.
@@ -50,8 +50,10 @@ function Heading({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function DayDetailDialog({ day, onClose }: {
+export function DayDetailDialog({ day, gain = null, onClose }: {
   day: DayCell | null;
+  /** The day's % of its opening balance; null when it cannot be measured. */
+  gain?: number | null;
   onClose: () => void;
 }) {
   const sessions = day ? bySession(day.trades) : { rows: [], unplaced: 0 };
@@ -71,6 +73,16 @@ export function DayDetailDialog({ day, onClose }: {
             {day.trades.length
               ? `${Math.round((wins / day.trades.length) * 100)}% win rate`
               : "no trades"}
+            {gain != null && (
+              <>
+                {" · "}
+                <span data-testid="day-detail-gain"
+                  className={cn("num font-semibold", pnlColour(gain))}>
+                  {formatGain(gain)}
+                </span>
+                {" of the day's opening balance"}
+              </>
+            )}
           </p>
 
           <section className="space-y-1">
@@ -115,6 +127,11 @@ export function DayDetailDialog({ day, onClose }: {
                   </span>
                   <span className={t.direction === "BUY" ? "text-profit" : "text-loss"}>
                     {t.direction}
+                  </span>
+                  {/* Owner, 2026-10-20: which strategy ran each trade. */}
+                  <span data-testid={`trade-strategy-${t.ticket}`}
+                    className="shrink-0 rounded bg-surface-2 px-1.5 text-[10px] text-ink-2">
+                    {t.strategy || "—"}
                   </span>
                   <span className="truncate text-ink-3">{t.reason || "—"}</span>
                   <span className={cn("num ml-auto shrink-0", pnlColour(t.pnl))}>

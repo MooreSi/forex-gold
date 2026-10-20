@@ -102,6 +102,51 @@ describe("the days", () => {
   });
 });
 
+describe("a day's % gain", () => {
+  it("shows the day's gain against its opening balance", async () => {
+    // Balance 1050 after a +$50 day: it opened on 1000, so +5.00%.
+    render(<CalendarSection days={30} balance={1050} />);
+
+    expect(await screen.findByTestId("day-gain-2026-09-15")).toHaveTextContent("+5.00%");
+  });
+
+  it("shows no gain when the balance is unknown", async () => {
+    render(<CalendarSection days={30} balance={null} />);
+    await screen.findByTestId("day-2026-09-15");
+
+    expect(screen.queryByTestId("day-gain-2026-09-15")).not.toBeInTheDocument();
+  });
+
+  it("shows the week's gain in its weekly total", async () => {
+    // 15 Sep 2026 is a Tuesday, in the grid's third row (index 2).
+    render(<CalendarSection days={30} balance={1050} />);
+
+    expect(await screen.findByTestId("week-gain-2")).toHaveTextContent("+5.00%");
+  });
+
+  it("shows no gain for a quiet week", async () => {
+    render(<CalendarSection days={30} balance={1050} />);
+    await screen.findByTestId("week-gain-2");
+
+    expect(screen.queryByTestId("week-gain-0")).not.toBeInTheDocument();
+  });
+
+  it("shows the month's gain beside its total", async () => {
+    render(<CalendarSection days={30} balance={1050} />);
+
+    expect(await screen.findByTestId("month-gain")).toHaveTextContent("+5.00%");
+  });
+
+  it("carries the gain into the day's detail", async () => {
+    render(<CalendarSection days={30} balance={1050} />);
+
+    await userEvent.click(await screen.findByTestId("day-2026-09-15"));
+
+    expect(within(screen.getByRole("dialog")).getByTestId("day-detail-gain"))
+      .toHaveTextContent("+5.00%");
+  });
+});
+
 describe("today", () => {
   it("marks the day the backend calls today", async () => {
     render(<CalendarSection days={30} />);
@@ -197,6 +242,21 @@ describe("a day's detail", () => {
       expect(within(screen.getByRole("dialog")).getByTestId("source-GoldSignals"))
         .toHaveTextContent("1 / 2");
     });
+
+  it("names the strategy against each trade", async () => {
+    body = { ...body, rows: [
+      trade({ ticket: 1, strategy: "Breakout" }),
+      trade({ ticket: 2, strategy: "" }),
+    ] };
+    render(<CalendarSection days={30} />);
+
+    await userEvent.click(await screen.findByTestId("day-2026-09-15"));
+
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByTestId("trade-strategy-1")).toHaveTextContent("Breakout");
+    // Not blank: an empty cell reads as a rendering fault.
+    expect(dialog.getByTestId("trade-strategy-2")).toHaveTextContent("—");
+  });
 
   it("lists the individual trades", async () => {
     render(<CalendarSection days={30} />);

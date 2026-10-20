@@ -87,13 +87,25 @@ export function groupByDay(rows: TradeRow[]): Map<string, TradeRow[]> {
  */
 export function dayGains(rows: TradeRow[], balance: number | null): Map<string, number> {
   const out = new Map<string, number>();
+  const byDay = groupByDay(rows);
+  for (const [day, open] of dayOpenBalances(rows, balance)) {
+    const pnl = byDay.get(day)!.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+    if (open > 0) out.set(day, (pnl / open) * 100);
+  }
+  return out;
+}
+
+/** Each traded day's opening balance, by the rule `dayGains` describes.
+ *  Empty without a balance. Values may be at or below zero (see `dayGains`);
+ *  every reader must check. */
+export function dayOpenBalances(rows: TradeRow[], balance: number | null): Map<string, number> {
+  const out = new Map<string, number>();
   if (balance == null || !Number.isFinite(balance)) return out;
   const byDay = groupByDay(rows);
   let after = 0;  // realised on the days later than the one being measured
   for (const day of [...byDay.keys()].sort().reverse()) {
     const pnl = byDay.get(day)!.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
-    const open = balance - after - pnl;
-    if (open > 0) out.set(day, (pnl / open) * 100);
+    out.set(day, balance - after - pnl);
     after += pnl;
   }
   return out;

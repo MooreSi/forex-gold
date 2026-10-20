@@ -223,6 +223,29 @@ def _save_disk_cache(events: list[dict]) -> None:
         }), encoding="utf-8")
     except Exception as e:
         _log.debug("[NewsCalendar] Could not write the on-disk cache: %s", e)
+    _keep_history(events)
+
+
+def history_file():
+    """Where `news_history` keeps past events: beside the feed cache, so
+    anything that moves the cache (the test suite does) moves this too."""
+    path = _disk_cache_file()
+    return path.parent / "news_history.json" if path is not None else None
+
+
+def _keep_history(events: list[dict]) -> None:
+    """Keep this fetch for the Analysis calendar (docs/todo/023). After the
+    cache write and fully guarded: the cache is what the blackout restarts
+    on, and a calendar nicety must never be able to cost it."""
+    try:
+        from backend.src.utils import news_history
+        path = history_file()
+        if path is None:
+            return
+        normal = [ev for ev in (_normalise(r) for r in events) if ev is not None]
+        news_history.merge(path, normal)
+    except Exception as e:
+        _log.debug("[NewsCalendar] Could not keep the news history: %s", e)
 
 
 def _retry_delay() -> float:

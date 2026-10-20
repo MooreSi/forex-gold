@@ -1,9 +1,9 @@
-"""The running build reports 0.613 "Security, bug fixes and app improvements",
-from one source, everywhere.
+"""The running build reports 0.614 "Bug fixes, calendar improvements and ML
+improvements", from one source, everywhere.
 
-It replaces the 0.612 "The VPS trades Telegram itself" pin (owner, 2026-10-11)
-with the same assertions: the release moved, so the pin moves with it, as it
-did from 0.611 to 0.612. Nothing in the app compares versions numerically, so
+It replaces the 0.613 "Security, bug fixes and app improvements" pin (owner,
+2026-10-20) with the same assertions: the release moved, so the pin moves with
+it, as it did from 0.612 to 0.613. Nothing in the app compares versions numerically, so
 the string is all that matters.
 
 "Everywhere" is the part with teeth. v0.42's own release notes record that
@@ -24,11 +24,11 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
 class TestTheReleaseItself:
-    def test_the_head_entry_is_0_613(self):
-        assert vh.RELEASES[0][0] == "v0.613"
+    def test_the_head_entry_is_0_614(self):
+        assert vh.RELEASES[0][0] == "v0.614"
 
-    def test_it_is_called_security_bug_fixes_and_app_improvements(self):
-        assert vh.RELEASES[0][1] == "Security, bug fixes and app improvements"
+    def test_it_is_called_bug_fixes_calendar_and_ml_improvements(self):
+        assert vh.RELEASES[0][1] == "Bug fixes, calendar improvements and ML improvements"
 
     def test_it_says_what_changed(self):
         """An empty release in the About screen is worse than no entry."""
@@ -39,29 +39,30 @@ class TestTheReleaseItself:
 
     def test_the_previous_release_is_still_there(self):
         """A version bump must not eat the history it is a history of."""
-        assert vh.RELEASES[1][0] == "v0.612"
-        assert vh.RELEASES[2][0] == "v0.611"
-        assert vh.RELEASES[3][0] == "v0.61"
-        assert vh.RELEASES[4][0] == "v0.6"
-        assert len(vh.RELEASES) >= 15
+        assert vh.RELEASES[1][0] == "v0.613"
+        assert vh.RELEASES[2][0] == "v0.612"
+        assert vh.RELEASES[3][0] == "v0.611"
+        assert vh.RELEASES[4][0] == "v0.61"
+        assert vh.RELEASES[5][0] == "v0.6"
+        assert len(vh.RELEASES) >= 16
 
 
 class TestEveryReporterAgrees:
     def test_the_derived_version(self):
-        assert vh.__version__ == "0.613"
+        assert vh.__version__ == "0.614"
 
     def test_the_settings_and_about_reporter(self):
-        assert system_controller.app_version() == "0.613"
+        assert system_controller.app_version() == "0.614"
 
     def test_the_reporter_the_admin_console_reads(self):
         """This is the one that goes out over the HELLO handshake. It reported
         a stale version once already."""
-        assert remote_controller.app_version() == "0.613"
+        assert remote_controller.app_version() == "0.614"
 
     def test_the_VERSION_file_fallback(self):
         """For callers that cannot import the package. It is derived, not
         hand-maintained -- importing version_history rewrites it."""
-        assert (REPO / "VERSION").read_text(encoding="utf-8").strip() == "0.613"
+        assert (REPO / "VERSION").read_text(encoding="utf-8").strip() == "0.614"
 
     def test_they_all_agree(self):
         """The actual property. Any single one of these being right while
@@ -75,8 +76,8 @@ class TestEveryReporterAgrees:
 
 
 class TestTheChangelog:
-    def test_it_has_a_0_613_entry(self):
+    def test_it_has_a_0_614_entry(self):
         head = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")[:400]
 
-        assert "v0.613" in head
-        assert "Security, bug fixes and app improvements" in head
+        assert "v0.614" in head
+        assert "Bug fixes, calendar improvements and ML improvements" in head

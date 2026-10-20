@@ -7,6 +7,48 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.614",
+        "Bug fixes, calendar improvements and ML improvements",
+        "blue",
+        "",
+        [
+            "Bug fixes: the MT5 bridge no longer restarts in a loop when the "
+            "broker stops answering tick-history reads, sends those reads one "
+            "at a time, and remembers the pause across app restarts, so the "
+            "bridge no longer needs restarting by hand after the app does.",
+            "Bug fixes: Breakout reads closed candles and both engines read "
+            "bar times in true UTC; a Breakout BUY is charged the spread once "
+            "and its break-even stop sits at true break-even; Set & Forget "
+            "confirmations, signal entry checks and AI validation are "
+            "corrected.",
+            "Bug fixes: the Mac keeps its own settings when it reconnects to "
+            "the VPS, a Reversal Engine trade shows the strategy it really "
+            "ran under and is graded on its own targets, the EA's closes read "
+            "\"EA TP\" or \"EA close\" instead of \"Manual\", and an "
+            "all-winners window says \"No losses\" instead of a red 0.00.",
+            "Bug fixes: the daily AI analysis no longer fails on every closed "
+            "trade, the remote client never scans a hosting provider's "
+            "network, the evidence collector no longer pins a CPU core, and "
+            "the goal-paused dialog offers \"Resume anyway\". The Bounce "
+            "engine is removed.",
+            "Calendar improvements: % gain on every day, week, month and "
+            "year; each trade's strategy in the day view; $, %, pips or R in "
+            "the cells; profit factor, averages, best, worst, fees, drawdown "
+            "and the day's P&L curve; streaks and weekday totals; a year "
+            "view; and markers for the daily goal, the loss limit and news.",
+            "Calendar improvements: a journal for each trading day (a note, "
+            "tags and a 1-5 mood), kept separately for demo and live. News "
+            "is now kept as it is fetched, so news markers start from this "
+            "release.",
+            "ML improvements, all off by default: training weighted by age, "
+            "learning from executed trades, Breakout learning realised R "
+            "with an accuracy gate, and its switches on the Breakout tab. "
+            "\"Is it learning?\" plots realised R and says what each model "
+            "learns from. Research added (session-drift trials) found no "
+            "edge, and is recorded as such.",
+        ],
+    ),
+    (
         "v0.613",
         "Security, bug fixes and app improvements",
         "blue",

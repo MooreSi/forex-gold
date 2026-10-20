@@ -1,3 +1,55 @@
+## v0.614 — Bug fixes, calendar improvements and ML improvements (2026-10-20)
+
+The About screen carries the user-facing summary; this is the engineering
+record. 30 commits since v0.613, grouped as the owner asked.
+
+**Bug fixes**
+- MT5 bridge: `/ticks` and `/tick_at` pause after a hung read (5 min,
+  doubling, capped at 6 h while it keeps hanging); the self-healer and
+  watchdog wait out a recent hang instead of restarting. The client sends
+  one tick-history read at a time and keeps the pause in
+  `DATA_DIR/tick_history_pause.json` across restarts. Cause outside the app:
+  MT5 on access point AS01 stops serving tick history.
+- Breakout hands go/retest/sweep the closed M5 bar, not the forming one;
+  Asian ranges and H1 bars are read in true UTC (`market/bar_clock`).
+- Breakout ledger charges a BUY the spread once (`ledger_cost_pts`), and a
+  BUY's break-even stop is entry + ledger cost (handover 054, owner-approved
+  test changes).
+- Set & Forget confirmations and AI validation; Trend PA / Reversal /
+  Breakout entry correctness (owner-approved characterization change).
+- The Mac's settings survive a reconnect to the VPS (`_adopt_peer_state`
+  queues local differences before mirroring down).
+- Reversal Engine trades: the strategy label follows the schedule window,
+  and Max TP is graded on the trade's own ladder (one-time repair).
+- EA closes labelled "EA TP" / "EA close" from `DEAL_REASON`; "No losses"
+  replaces a red 0.00 profit factor; "Resume anyway (ignore today's goal)".
+- Daily AI analysis format-spec crash fixed; AI analysis no longer called
+  Claude's; the remote client's LAN scan skips public addresses; the
+  evidence collector's context query uses an index seek (a full pass
+  went from about 3 min to 0.18 s).
+- A close Windows cannot convert yields no trading day (CI OSError 22).
+- The Bounce engine is removed from the registry, sync and stats.
+
+**Calendar improvements** (docs/todo/023)
+- % gain of the opening balance per day, week, month and year; each
+  trade's strategy in the day popup.
+- Cell figure toggle ($ / % / pips / R), day stats (profit factor, averages,
+  best, worst, fees, peak, realised drawdown, P&L curve), streaks, weekday
+  totals, a year view, and markers for goal reached, loss limit reached,
+  news and journal notes.
+- Day journal (`/api/calendar/journal`, `day_journal` in reversal_engine.db
+  per `account_env`) and news history (`news_history.json`, kept from each
+  feed fetch; `/api/calendar/news`). Provisional defaults: handover 055.
+
+**ML improvements**
+- Time-decay training weights, executed-trade labels, Breakout realised-R
+  label with an AUC gate, market-state features (migration 62, all off).
+- "Is it learning?" plots realised R and shows each model's label, weights
+  and effective sample size; Breakout's ML switches moved to its own tab.
+- Recorded: the reversal online SGD term fits the median of R (no change).
+- Research: session-drift trials (no edge); optional round-number exits
+  and volatility-forecast stops for templates (migration 63, off).
+
 ## v0.613 — Security, bug fixes and app improvements (2026-10-11)
 
 The About screen carries the user-facing summary; this is the engineering

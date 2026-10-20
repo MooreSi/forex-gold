@@ -115,6 +115,14 @@ async def bridge_watchdog_check(
                 )
             )
 
+    # 2026-10-19: a hung tick read freezes the bridge for 60-70s and then
+    # clears; restarting it costs an MT5 cold start for nothing.
+    hung = getattr(bridge, "tick_read_hung_recently", None)
+    if callable(hung) and hung():
+        log.info("Bridge watchdog: a tick read hung moments ago -- waiting it out, "
+                 "no restart yet")
+        return CHECK_INTERVAL
+
     if not bridge_inhibit_reconnect:
         now = now_monotonic if now_monotonic is not None else monotonic()
         if now - state["last_restart_at"] >= RESTART_COOLDOWN:

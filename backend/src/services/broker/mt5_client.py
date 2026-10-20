@@ -8,6 +8,7 @@ so the underlying TCP connection is kept alive across requests — avoids a
 TCP handshake + client object setup overhead on every call.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -99,8 +100,28 @@ _TICK_FAIL_WARN_THRESHOLD = 5
 # after the first one.
 _CLIENT_RECYCLE_THRESHOLD = 30
 
+# A hung tick-range read freezes the whole bridge (2026-10-19, owner's Mac).
+# From a 15:11 broker access-point switch, copy_ticks_range never answered
+# again for any window while bars and the account answered in milliseconds,
+# and the stuck native call took /health down with it. The evidence collector
+# asks every 30s, so every fresh terminal froze within a minute and the
+# watchdog tore Wine down 46 times in 2.5 hours. After a read times out, or
+# its caller gives up on it, the next ones (/tick_at too: same history)
+# return what a failure already returns, at once, for a pause that doubles while it keeps hanging.
+_TICKS_PAUSE_MIN_S = 300.0
+_TICKS_PAUSE_MAX_S = 3600.0
+_ticks_clock = time.monotonic
+# The freeze a hung read causes clears by itself in 60-70s (observed). The
+# watchdog and the self-healer wait this long after one before restarting.
+TICK_HANG_HOLD_S = 120.0
+
 
 class MT5BridgeClient:
+    # Class-level so a client built without __init__ (several tests) has them.
+    _ticks_paused_until = 0.0
+    _ticks_pause_s = 0.0
+    _ticks_hung_at: Optional[float] = None
+
     def __init__(self, bridge_url: str):
         self._url  = bridge_url.rstrip("/") if bridge_url else ""
         self._http: Optional[httpx.AsyncClient] = None
@@ -332,7 +353,7 @@ class MT5BridgeClient:
         promoted; a 500 or a dropped connection stays a quiet empty list,
         because this feeds a page button and the caller renders that fine.
         """
-        if not self._url:
+        if not self._url or _ticks_clock() < self._ticks_paused_until:
             return []
         try:
             r = await self._request(
@@ -347,12 +368,31 @@ class MT5BridgeClient:
                     "bridge to pick up the current mt5_bridge.py."
                 )
             r.raise_for_status()
+            self._ticks_pause_s = 0.0
             return r.json().get("ticks", [])
         except RuntimeError:
             raise
+        except asyncio.CancelledError:
+            self._pause_tick_reads("its caller gave up waiting")
+            raise
+        except httpx.ReadTimeout:
+            self._pause_tick_reads("it timed out")
+            return []
         except Exception as e:
             log.debug("bridge ticks fetch failed: %s", e)
             return []
+
+    def tick_read_hung_recently(self) -> bool:
+        return (self._ticks_hung_at is not None
+                and _ticks_clock() - self._ticks_hung_at < TICK_HANG_HOLD_S)
+
+    def _pause_tick_reads(self, why: str) -> None:
+        self._ticks_pause_s = min(max(2 * self._ticks_pause_s, _TICKS_PAUSE_MIN_S),
+                                  _TICKS_PAUSE_MAX_S)
+        self._ticks_hung_at = _ticks_clock()
+        self._ticks_paused_until = self._ticks_hung_at + self._ticks_pause_s
+        log.warning("bridge tick-range read hung (%s) -- pausing tick-range reads "
+                    "for %ds so the bridge is not frozen again", why, self._ticks_pause_s)
 
     # ── Account / positions ───────────────────────────────────────────────────
 
@@ -525,13 +565,19 @@ class MT5BridgeClient:
         return None
 
     async def get_tick_at(self, ts: float) -> Optional[dict]:
-        if not self._url:
+        # Same tick history as /ticks (copy_ticks_from), so the same pause.
+        if not self._url or _ticks_clock() < self._ticks_paused_until:
             return None
         try:
             r = await self._request("get", f"{self._url}/tick_at",
                                     timeout=8.0, params={"ts": ts})
             if r.status_code == 200:
                 return r.json()
+        except asyncio.CancelledError:
+            self._pause_tick_reads("its caller gave up waiting")
+            raise
+        except httpx.ReadTimeout:
+            self._pause_tick_reads("a tick_at read timed out")
         except Exception:
             pass
         return None

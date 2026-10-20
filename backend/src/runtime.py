@@ -1402,8 +1402,9 @@ class TradingRuntime:
 
         Body lives in services/broker/bridge_process.py; the runtime keeps
         the name because the self-healer and the bot's /restartbridge both
-        reach for it here.
+        reach for it here. The self-healer reads _bridge_restarted_at.
         """
+        self._bridge_restarted_at = time.monotonic()
         return await _start_bridge_process_impl(self._bridge, self._using_native_bridge)
 
     async def _bridge_watchdog_loop(self) -> None:

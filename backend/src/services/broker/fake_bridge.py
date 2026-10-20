@@ -76,6 +76,9 @@ class FakeMT5Bridge:
     def url(self) -> str:
         return "fake://offline"
 
+    def tick_read_hung_recently(self) -> bool:
+        return False  # a fake tick read never hangs
+
     def is_configured(self) -> bool:
         return True
 

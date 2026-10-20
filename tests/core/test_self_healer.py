@@ -374,3 +374,103 @@ class TestTheHealActions:
             no_notifications.clear()
             await sh.SelfHealer(_Engine())._heal(condition)
             assert len(no_notifications) == 1, f"{condition} did not notify"
+
+
+@pytest.mark.asyncio
+class TestItDoesNotFightTheWatchdog:
+    """2026-10-19, owner's Mac: the watchdog and the self-healer each restarted
+    the bridge on their own clocks, 46 times in two and a half hours, twice
+    within ten seconds at 17:19. Each restart is an MT5 cold start; the
+    failures it logs while warming up stay in the healer's five-minute window
+    and read as a fresh outage. A restart by ANYONE starts the same grace a
+    boot does, and Stop Bridge is the user's call, not a symptom."""
+
+    @staticmethod
+    def _engine(restarted_ago=None, inhibit=False):
+        engine = _Engine(started_at=None)
+        if restarted_ago is not None:
+            engine._bridge_restarted_at = time.monotonic() - restarted_ago
+        engine._bridge_inhibit_reconnect = inhibit
+        return engine
+
+    async def test_a_bridge_restarted_moments_ago_is_left_to_warm_up(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = _lines("bridge not responding to tick requests", 30)
+        engine = self._engine(restarted_ago=60)
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine.bridge_starts == 0
+        assert no_notifications == []
+
+    async def test_it_acts_once_the_restart_grace_has_passed(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = _lines("bridge not responding to tick requests", 30)
+        engine = self._engine(restarted_ago=sh._BRIDGE_STARTUP_GRACE + 1)
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine.bridge_starts == 1
+
+    async def test_a_bridge_the_user_stopped_is_not_restarted(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = _lines("Connection refused localhost:9000", 30)
+        engine = self._engine(inhibit=True)
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine.bridge_starts == 0
+        assert no_notifications == []
+
+    async def test_the_restart_grace_does_NOT_suppress_other_conditions(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = _lines("Watchdog: client dropped", sh._THRESHOLD)
+        engine = self._engine(restarted_ago=10, inhibit=True)
+        engine._tg_reader = _Reader()
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine._tg_reader.reconnects == 1
+
+
+@pytest.mark.asyncio
+class TestARecoveredBridgeIsNotRestarted:
+    """2026-10-19 evening: four self-heal restarts (18:58, 19:08, 19:28,
+    20:09) each came 20-30s after the client had logged 'bridge tick fetch
+    recovered'. The failures were still inside the five-minute window, so the
+    healer restarted a bridge that was already answering -- an MT5 cold start
+    for nothing. What counts is whether the LAST word in the log is failure."""
+
+    async def test_failures_followed_by_recovery_do_not_heal(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = (
+            _lines("bridge not responding to tick requests (9 consecutive failures)", 30)
+            + _lines("bridge tick fetch recovered after 36 consecutive failures", 1))
+        engine = _Engine(started_at=None)
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine.bridge_starts == 0
+
+    async def test_failing_again_after_a_recovery_still_heals(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = (
+            _lines("bridge not responding to tick requests (9 consecutive failures)", 10)
+            + _lines("bridge tick fetch recovered after 10 consecutive failures", 1)
+            + _lines("bridge not responding to tick requests (5 consecutive failures)", 5))
+        engine = _Engine(started_at=None)
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine.bridge_starts == 1
+
+    async def test_the_watchdog_seeing_it_back_online_counts_as_recovery(
+            self, log_lines, no_notifications):
+        log_lines["lines"] = (
+            _lines("Connection refused localhost:9000", 10)
+            + _lines("Bridge watchdog: bridge is back online", 1))
+        engine = _Engine(started_at=None)
+
+        await sh.SelfHealer(engine)._scan()
+
+        assert engine.bridge_starts == 0

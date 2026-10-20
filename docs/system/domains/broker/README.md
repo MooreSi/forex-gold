@@ -616,3 +616,54 @@ Windows-only. Pinned by `tests/services/broker/test_ea_source_syncs_off_windows.
 - **`get_tick_at` answers with the first tick of the next hour** on the Mac's
   terminal in every logged case (bugs/052 addendum). Do not trust a
   historical tick from it without checking its `time`.
+
+## A hung tick read froze the bridge into a restart loop (2026-10-19)
+
+Reported as "MT5 keeps crashing". It was not crashing: its journal shows clean
+starts and logins, and no errors. The app was killing it, 46 times between
+15:13 and 17:45 on the owner's Mac (demo account).
+
+- **Trigger.** At 15:11:13 MT5 switched to a "better access point" (AS03 to
+  AS01) and logged `connection to VantageMarkets-Demo lost`. It was
+  re-authorised a second later. From that second, `copy_ticks_range` never
+  answered again, for any window, even 60s from that morning. Bars, account and
+  positions kept answering in milliseconds. The reversal evidence store's last
+  `bridge tick range` row is 14:11:14 UTC, the same second.
+- **A hung native call freezes the whole bridge, `/health` included.** The
+  bounded `/health` (1s lock wait) still timed out at 6s, and the bridge used 0%
+  CPU while it was frozen, so it was blocked rather than busy. Our best guess is
+  that the MetaTrader5 package holds the GIL while it waits. Nobody has proved
+  that.
+- **The loop.** `evidence/runtime.py` asks for a tick range every 30s, so every
+  fresh terminal froze within a minute. The watchdog then tore Wine down. The
+  self-healer, on its own clock, counted the dead terminal's tick failures still
+  in its 5-minute window and restarted it again. At 17:19 they did it 10s apart.
+  Each teardown also leaves two `winedevice.exe` behind (about 60 by 17:30).
+- **Fixed.** `MT5BridgeClient.get_ticks_range` now pauses tick-range reads after
+  a read times out or its caller gives up. The pause is 5 minutes and doubles up
+  to an hour while reads keep hanging. During the pause the client returns the
+  `[]` that any failure already returned. `get_tick_at` (`copy_ticks_from`)
+  hung the same way. The first fix missed it, and the fill-cost and
+  entry-spread reports kept freezing the bridge, so it shares the same
+  pause. `TradingRuntime.start_bridge_process`
+  records `_bridge_restarted_at`. The self-healer gives any restart the same
+  330s grace that a boot gets, and it never restarts a bridge the user stopped.
+  It also skips the restart when a recovery line (`bridge tick fetch
+  recovered`, `bridge is back online`) comes after the last failure in the
+  window. On the evening of the 19th it restarted already-recovered bridges
+  four times, 20 to 30s after they recovered.
+  Each pause expiry still meant one hung read and a 60-70s freeze that
+  cleared by itself, but the healer restarted it 31s in (21:22). The client
+  now records the hang (`tick_read_hung_recently`, `TICK_HANG_HOLD_S` =
+  120s), and the watchdog and healer both wait that long before restarting.
+  Pinned by `tests/broker/test_a_tick_hang_is_waited_out.py`,
+  `tests/broker/test_a_hung_tick_read_pauses_tick_reads.py`,
+  `tests/core/test_bridge_restart_is_recorded.py` and
+  `TestItDoesNotFightTheWatchdog`.
+- **Still open.** Why `copy_ticks_range` stopped answering after the
+  access-point switch. Moving `202610.tkc` aside did not help (20:40). MT5 made
+  a fresh 1.7KB file, the read still hung, and there was no network traffic,
+  so this is not a slow re-download. The next suspect is AS01 itself. Every
+  session since 15:11 has connected through it, and AS03 served ticks before. The
+  original file is kept as `202610.tkc.bak-20261019`. `mt5_bridge.py` was not changed. It is a
+  money surface and needs a demo session.

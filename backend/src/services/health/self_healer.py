@@ -59,6 +59,10 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+# Lines that say the bridge answers again (mt5_client, watchdog). Neither
+# matches a _PATTERNS entry.
+_BRIDGE_RECOVERED = re.compile(r"(bridge tick fetch recovered|bridge is back online)", re.I)
+
 _TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 
 # Log volume varies, but this app's chattiest bursts (loop_monitor task-list
@@ -198,10 +202,20 @@ class SelfHealer:
             return
 
         counts: dict[str, int] = {}
-        for _ts, line in lines:
+        last_seen: dict[str, int] = {}
+        bridge_recovered_at = -1
+        for i, (_ts, line) in enumerate(lines):
+            if _BRIDGE_RECOVERED.search(line):
+                bridge_recovered_at = i
             for key, pattern in _PATTERNS:
                 if pattern.search(line):
                     counts[key] = counts.get(key, 0) + 1
+                    last_seen[key] = i
+        # 2026-10-19: four restarts of a bridge that had already logged its
+        # recovery 20-30s earlier. The window still held the failures; what
+        # matters is whether the last word is failure.
+        if bridge_recovered_at > last_seen.get("bridge_offline", -1):
+            counts.pop("bridge_offline", None)
 
         for condition, count in counts.items():
             if count < _THRESHOLD:
@@ -221,6 +235,21 @@ class SelfHealer:
                         "cold-start warmup, not healing",
                         count,
                     )
+                    continue
+                # 2026-10-19: the watchdog and this healer took turns
+                # restarting the bridge, 46 times in 2.5 hours. Any restart is
+                # a cold start, whoever asked; Stop Bridge is the user's call.
+                restarted_at = getattr(self._engine, "_bridge_restarted_at", None)
+                hung = getattr(getattr(self._engine, "_bridge", None),
+                               "tick_read_hung_recently", None)
+                if ((callable(hung) and hung())
+                        or getattr(self._engine, "_bridge_inhibit_reconnect", False)
+                        or (restarted_at is not None
+                            and time.monotonic() - restarted_at < _BRIDGE_STARTUP_GRACE)):
+                    # Worded so it cannot match _PATTERNS and feed the count.
+                    _log.info("[SelfHealer] skipping a bridge restart (%d matching lines): "
+                              "stopped by the user, restarted under %ds ago, or a tick read just hung",
+                              count, _BRIDGE_STARTUP_GRACE)
                     continue
 
             now = time.time()

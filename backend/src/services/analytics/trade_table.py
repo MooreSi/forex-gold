@@ -36,6 +36,7 @@ from backend.src.services.analytics import formatting as _formatting
 from backend.src.services.analytics import labels as _labels
 from backend.src.services.analytics import pnl as _pnl
 from backend.src.services.analytics import ticket_maps as _maps
+from backend.src.services.analytics import trade_excursion as _excursion
 from backend.src.services.broker import fees as _fees
 from backend.src.services.positions import spread_cache_repo as _spreads
 from backend.src.services.risk import clock as _clock
@@ -257,6 +258,20 @@ async def closed_trades(engine: Any, days: int, today: bool = False) -> dict:
             "group": list(group.get(str(ticket))) if group.get(str(ticket)) else None,
             "contract_size": CONTRACT_SIZE,
         })
+
+    # How far each trade went either way (docs/todo/024). Cached for good;
+    # positions the cache has not seen are measured from candles, a bounded
+    # number per read, the same shape as the entry spreads above.
+    excursions = await _excursion.cached([r["ticket"] for r in rows])
+    unseen = [(r["ticket"], r["direction"], r["entry_price"], r["exit_price"],
+               r["open_ts"], r["close_ts"])
+              for r in rows
+              if r["ticket"] not in excursions and r["entry_price"] and r["open_ts"]]
+    if unseen:
+        excursions.update(await _excursion.fill(engine, unseen))
+    for r in rows:
+        r.update(_excursion.row_fields(excursions.get(r["ticket"]), r["pips"],
+                                       r["lots"], CONTRACT_SIZE))
 
     rows.sort(key=lambda r: r["close_ts"], reverse=True)
     # The curve is built from these same rows rather than from a second read.

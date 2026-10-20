@@ -91,6 +91,8 @@ them and deliberately did not pre-empt `docs/todo/bugs/057`.
   (`docs/simon-handover/039-cme-futures-context-is-free-is-it-worth-building.md`).
 - **PBO comes out high on noise, not at 0.5.** In a finite sample the in-sample and out-of-sample halves partition the same draws, so a configuration that won in sample by luck gives that luck back on the complement. Measured at 0.85 on a 20-configuration noise fixture. Read the direction, not the digit.
 
+- **Gold positioning sources (docs/todo/024, verified 2026-10-20).** COT: CFTC Socrata dataset `72hh-3qpy` (Disaggregated Futures Only), COMEX gold is `cftc_contract_market_code = '088691'`, managed money is `m_money_positions_long_all` / `_short_all`. Report dated Tuesday, published Friday. GLD: `api.spdrgoldshares.com/api/v1/historical-archive?product=gld&exchange=NYSE&lang=en` is an xlsx (sheet "US GLD Historical Archive", dates as `dd-Mon-yyyy` strings, column "Tonnes of Gold"); the old `GLD_US_archive_EN.csv` path redirects to the bar-list PDF, and yfinance's `get_shares_full("GLD")` returns None. `market/positioning.py` reads it with `zipfile` + ElementTree and finds the column by header name. Display only; cached in `DATA_DIR/positioning.json`.
+
 ## Open questions
 
 - The liquidity-map level types (`pdh`, `pwl`, `vwap`, `poc`, …) carry a provisional strength of 2 and inherit `score_level`'s 0.50 default for unknown types. Their real weights need the per-type attribution in `reversal_engine/attribution.py` over enough closed trades, and should not be raised before that.

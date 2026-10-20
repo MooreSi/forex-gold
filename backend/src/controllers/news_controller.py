@@ -17,11 +17,12 @@ forwarder's target and could not find this one.
 """
 from __future__ import annotations
 
+from backend.src.services.market import positioning as _positioning
 from backend.src.utils import news_calendar as _news
 
 __all__ = [
     "get_events", "get_current_event", "get_blackout_settings",
-    "news_pause_state", "invalidate_cache",
+    "news_pause_state", "invalidate_cache", "positioning",
 ]
 
 
@@ -48,3 +49,9 @@ def invalidate_cache(*args, **kwargs):
     """Drop the cached feed so the next read re-fetches."""
     return _news.invalidate_cache(*args, **kwargs)
 
+
+
+async def positioning():
+    """CFTC managed-money and GLD holdings for gold (docs/todo/024). May
+    fetch whichever is stale; display only."""
+    return await _positioning.snapshot()

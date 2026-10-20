@@ -4,6 +4,7 @@ import {
 } from "@/components/shared/format";
 import { asArray } from "@/lib/asArray";
 import { useClosedTrades, type TradeRow } from "../hooks/useClosedTrades";
+import { captureText, excursionText, excursionTitle } from "./excursionFormat";
 
 /**
  * Every closed trade in the window, deal by deal.
@@ -43,7 +44,7 @@ function lots(row: TradeRow): string {
 
 const COLUMNS = [
   "Closed", "Ticket", "Side", "Entry", "Exit", "Lots", "P&L", "Pips",
-  "Cost", "Spread", "Held", "Order", "Pending", "Max TP", "R:R", "Channel",
+  "MAE", "MFE", "Capture", "Cost", "Spread", "Held", "Order", "Pending", "Max TP", "R:R", "Channel",
   "Strategy", "Reason",
 ];
 
@@ -76,7 +77,7 @@ export function TradeTableSection({ days }: { days: number }) {
         {rows.length} closed {rows.length === 1 ? "trade" : "trades"}, from MT5's
         own deal history — including any opened outside this app.
       </p>
-      <table className="w-full min-w-[60rem] text-left text-[11px]">
+      <table className="w-full min-w-[68rem] text-left text-[11px]">
         <thead className="text-ink-3">
           <tr>{COLUMNS.map((c) => <th key={c} className="px-2 py-1 font-normal">{c}</th>)}</tr>
         </thead>
@@ -104,6 +105,15 @@ export function TradeTableSection({ days }: { days: number }) {
                 <td className={`px-2 py-1 ${row.pips == null ? "text-ink-3" : pnlColour(row.pips)}`}>
                   {row.pips == null ? "—" : `${row.pips >= 0 ? "+" : ""}${row.pips.toFixed(1)}`}
                 </td>
+                {/* How far it went against us and for us, in pips, and how
+                    much of the best price it banked (docs/todo/024). */}
+                <td className="px-2 py-1 text-loss" title={excursionTitle(row)}>
+                  {excursionText(row, "mae")}
+                </td>
+                <td className="px-2 py-1 text-profit" title={excursionTitle(row)}>
+                  {excursionText(row, "mfe")}
+                </td>
+                <td className="px-2 py-1 text-ink-2">{captureText(row)}</td>
                 {/* Already inside `pnl` via MT5's real fill prices. Shown as
                     a breakdown, never subtracted a second time. */}
                 <td className="px-2 py-1 text-ink-3">{formatMoney(row.fees)}</td>

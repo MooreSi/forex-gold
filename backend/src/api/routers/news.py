@@ -62,3 +62,10 @@ async def refresh() -> dict:
     """Drop the cached feed and read it again. The Refresh button."""
     news_ctl.invalidate_cache()
     return await state()
+
+
+@router.get("/positioning")
+async def positioning() -> dict:
+    """Who holds gold: CFTC managed money and GLD tonnes (docs/todo/024).
+    Display only; each source is cached for hours and fetched off the loop."""
+    return await news_ctl.positioning()

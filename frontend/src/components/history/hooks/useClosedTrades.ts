@@ -33,6 +33,18 @@ export interface TradeRow {
   rr: number | null;
   spread_points: number | null;
   group: [string, number] | null;
+  /**
+   * How far the trade went against us (MAE) and in our favour (MFE), in pips
+   * and in $ at the opening lots, and `capture` = pips banked / MFE pips
+   * (docs/todo/024). All null until the backend has measured the trade;
+   * `excursion_res` is then "M1" or "M5", or "none" when it could not be.
+   */
+  mae_pips?: number | null;
+  mfe_pips?: number | null;
+  mae_usd?: number | null;
+  mfe_usd?: number | null;
+  capture?: number | null;
+  excursion_res?: string | null;
 }
 
 export interface CurvePoint { ts: number; pnl: number }

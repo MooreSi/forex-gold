@@ -333,4 +333,19 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN round_number_exits_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN vol_forecast_stops_enabled INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # How far each closed position went against us and in our favour, for
+    # the Analysis table (docs/todo/024). Measured once from candles and kept:
+    # a past price path never changes. NULL mae/mfe with resolution 'none' is
+    # a trade that could not be measured, remembered so it is not asked again.
+    # Written by services/positions/excursion_cache_repo.py only.
+    (64, "Trade excursions (MAE/MFE) cache", [
+        """CREATE TABLE IF NOT EXISTS trade_excursion_cache (
+            position_id  INTEGER PRIMARY KEY,
+            mae_price    REAL,
+            mfe_price    REAL,
+            resolution   TEXT NOT NULL,
+            computed_at  REAL NOT NULL
+        )""",
+    ]),
 ]

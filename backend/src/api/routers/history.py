@@ -16,13 +16,14 @@ other's period.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from backend.src.api.deps import engine as engine_dep
 from backend.src.controllers import history_controller as history_ctl
+from backend.src.controllers import monte_carlo_controller as monte_carlo_ctl
 from backend.src.controllers import system_controller as system_ctl
 
 log = logging.getLogger(__name__)
@@ -105,6 +106,16 @@ async def closed_trades(days: int = DAYS, today: bool = TODAY,
     and "the bridge is down" look identical in an empty table.
     """
     return await history_ctl.closed_trade_table(eng, days, today)
+
+
+@router.get("/monte-carlo")
+async def monte_carlo(days: int = DAYS,
+                      horizon: Optional[int] = Query(None, ge=1, le=1000),
+                      eng: Any = Depends(engine_dep)) -> dict:
+    """How the next `horizon` trades could go, resampled from this window's
+    closed trades (docs/todo/024). Its own endpoint: 5,000 paths is work the
+    table's 15-second poll should not pay for."""
+    return await monte_carlo_ctl.monte_carlo(eng, days, horizon)
 
 
 @router.get("/today")

@@ -15,6 +15,8 @@ import { DpmSection } from "./internal/DpmSection";
 import { EquityCurveSection } from "./internal/EquityCurveSection";
 import { TradeAnalysisPanel } from "@/components/ai/TradeAnalysisPanel";
 import { TradeTableSection } from "./internal/TradeTableSection";
+import { ExcursionSummarySection } from "./internal/ExcursionSummarySection";
+import { MonteCarloSection } from "./internal/MonteCarloSection";
 import { CompoundCalculatorSection } from "./internal/CompoundCalculatorSection";
 
 const SUB_TABS = [
@@ -25,6 +27,8 @@ const SUB_TABS = [
   { id: "trades", label: "Trades" },
   { id: "equity", label: "Equity curve" },
   { id: "calendar", label: "Calendar" },
+  // Monte Carlo on the window's own trades (docs/todo/024).
+  { id: "risk", label: "Risk" },
   { id: "hours", label: "When it trades" },
   { id: "channels", label: "Channels" },
   { id: "ladder", label: "Ladder reach" },
@@ -116,6 +120,9 @@ export function HistoryPanel() {
               <CalendarSection days={c.days}
                 balance={accountBalance(c.state.data.performance)} />
             </Tabs.Content>
+            <Tabs.Content value="risk">
+              <MonteCarloSection days={c.days} />
+            </Tabs.Content>
             <Tabs.Content value="hours">
               <HeatmapSection cells={c.hourly} />
             </Tabs.Content>
@@ -139,6 +146,7 @@ export function HistoryPanel() {
               {/* Its own endpoint, not a field on /state: this is a row per
                   trade and the rest of the tab is aggregates. A window nobody
                   is looking at should not be paying for it. */}
+              <ExcursionSummarySection days={c.days} />
               <TradeTableSection days={c.days} />
             </Tabs.Content>
             <Tabs.Content value="compound">

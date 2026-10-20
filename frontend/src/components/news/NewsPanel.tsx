@@ -9,6 +9,7 @@ import { useNewsController } from "./hooks/useNewsController";
 import { BlackoutSection } from "./internal/BlackoutSection";
 import { EventsSection } from "./internal/EventsSection";
 import { NewsBanner } from "./internal/NewsBanner";
+import { PositioningSection } from "./internal/PositioningSection";
 
 /**
  * The next release the blackout would actually hold entries for.
@@ -74,6 +75,7 @@ export function NewsPanel() {
           <NewsBanner current={data.current} next={nextHighImpact(c.events)} />
           <BlackoutSection settings={asObject(data.blackout)} onSave={c.saveBlackout} />
           <EventsSection events={c.events} />
+          <PositioningSection />
         </div>
       )}
     </PanelShell>

@@ -27,8 +27,9 @@ from backend.src.services.market import gex_report
 
 log = logging.getLogger(__name__)
 
-__all__ = ["REPORTS", "run_local", "fill_cost_async", "gex_async",
-           "signals_from_trading_node"]
+__all__ = ["REPORTS", "run_local", "register", "fill_cost_async", "gex_async",
+           "signals_from_trading_node", "engines_on_peer", "panel_from_engine_node",
+           "brain_async", "trend_pa_from_engine_node"]
 
 # How many signals one answer carries, newest first. The link's frames are
 # capped at 1 MiB (websockets' default) and a signal row is ~0.6 KB, so this
@@ -47,11 +48,28 @@ async def _signals_report(status: Any = None, limit: int = SIGNALS_LIMIT) -> dic
     return {"signals": rows[:limit]}
 
 
+async def _brain_report(limit: int = 60) -> dict:
+    """The Brain view: this node's gates and recent entry decisions."""
+    from backend.src.services.brain import feed
+    return await feed.snapshot_async(limit)
+
+
+async def _trend_pa_report() -> dict:
+    """The Trend PA panel exactly as this node's own dashboard builds it."""
+    from backend.src.services.trend_pa import panel_data
+    return await db_module.to_db_thread(panel_data.local_report)
+
+
 # The only reports a peer may ask for. The name arrives off the wire.
+# `register` adds the Signal Generator panels: their builders live in the API
+# layer (backend/src/api/routers/engines.py), which a service may not import,
+# so the composition root hands them in.
 REPORTS = {
     "fill_cost": fill_cost_report.report_async,
     "gex": gex_report.report_async,
     "signals": _signals_report,
+    "brain": _brain_report,
+    "trend_pa_panel": _trend_pa_report,
 }
 # Per report, the arguments it takes and how each is checked.
 _ARGS = {
@@ -61,7 +79,15 @@ _ARGS = {
         "status": lambda v: v is None or (isinstance(v, str) and 0 < len(v) <= 32),
         "limit": _int_in(1, 2000),
     },
+    "brain": {"limit": _int_in(1, 500)},
+    "trend_pa_panel": {},
 }
+
+
+def register(name: str, build) -> None:
+    """Offer a no-argument report to the peer under `name`. Composition root only."""
+    REPORTS[name] = build
+    _ARGS[name] = {}
 
 
 def trader_is_peer() -> bool:
@@ -90,10 +116,24 @@ async def run_local(name: Any, args: dict) -> Any:
     return await REPORTS[name](**args)
 
 
-async def on_trading_node(name: str, **args: Any) -> dict:
-    """The named report from the node that trades, tagged with which node that was."""
-    if not trader_is_peer():
-        return {**await REPORTS[name](**args), "node": "local"}
+def _centralized() -> bool:
+    try:
+        return bool(db_module.get_risk_settings().get("centralized_signal_gen_enabled"))
+    except Exception:
+        return False
+
+
+def engines_on_peer() -> bool:
+    """True on a Mac whose Signal Generator engines are running on the VPS.
+
+    The VPS trading is not enough: under centralized generation the engines
+    run HERE and the VPS's are idle (node_roles.engines_generate_here).
+    """
+    return trader_is_peer() and not _centralized()
+
+
+async def _ask_peer(name: str, args: dict) -> dict:
+    """The named report from the paired VPS. Raises RemoteControlFailed."""
     try:
         ack = await _client.get_instance().request_peer_report(name, args)
     except asyncio.TimeoutError as exc:
@@ -110,6 +150,63 @@ async def on_trading_node(name: str, **args: Any) -> dict:
     if (ack or {}).get("error"):
         raise RemoteControlFailed(f"The trading node refused: {ack['error']}")
     return {**((ack or {}).get("result") or {}), "node": "remote"}
+
+
+async def on_trading_node(name: str, **args: Any) -> dict:
+    """The named report from the node that trades, tagged with which node that was."""
+    if not trader_is_peer():
+        return {**await REPORTS[name](**args), "node": "local"}
+    return await _ask_peer(name, args)
+
+
+def _older_vps(exc: Exception) -> bool:
+    return "unknown report" in str(exc)
+
+
+_UPDATE_THE_VPS = ("The VPS is running older code that cannot send this panel. "
+                   "Update it (Settings > Remote), then restart it.")
+
+
+async def panel_from_engine_node(name: str, build_local) -> dict:
+    """A Signal Generator panel from the node whose engines are generating.
+
+    Here: `build_local()` unchanged. On the VPS: its own build of the same
+    panel, tagged `node: "remote"`. Never this node's in its place.
+    """
+    if not engines_on_peer():
+        return await build_local()
+    try:
+        return await _ask_peer(name, {})
+    except RemoteControlFailed as exc:
+        if _older_vps(exc):
+            raise RemoteControlFailed(_UPDATE_THE_VPS) from exc
+        raise
+
+
+async def brain_async(limit: int = 60) -> dict:
+    """The Brain view from the node that trades: its gates, its decisions."""
+    return await on_trading_node("brain", limit=limit)
+
+
+async def trend_pa_from_engine_node() -> dict:
+    """The Trend PA panel from the VPS when its engines are generating.
+
+    A VPS too old to answer still broadcasts its Trend PA report every cycle
+    (remote_stats_facade); that copy is the VPS's own data, so it is shown
+    rather than refused. Only with neither is the failure raised.
+    """
+    try:
+        got = await _ask_peer("trend_pa_panel", {})
+    except RemoteControlFailed as exc:
+        if not _older_vps(exc):
+            raise
+        copy = (getattr(_client.get_instance(), "remote_signal_gen_stats", None)
+                or {}).get("trend_pa") or {}
+        if not copy:
+            raise RemoteControlFailed(_UPDATE_THE_VPS) from exc
+        return {**copy, "where": "remote"}
+    got.pop("node", None)
+    return {**got, "where": "remote"}
 
 
 async def fill_cost_async(days: int = 14) -> dict:

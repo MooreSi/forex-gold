@@ -30,6 +30,10 @@ export interface EnginesState {
 }
 
 export interface ReversalReport {
+  /** "remote" when the VPS built it (its engines are the ones generating). */
+  node?: string;
+  /** The pro signal model of the node that built the report. */
+  pro_model?: Record<string, unknown>;
   realised: Record<string, unknown>;
   edge: Record<string, unknown>;
   shadow: unknown;

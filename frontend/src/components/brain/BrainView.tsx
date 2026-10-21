@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { NodeSourceTag } from "@/components/shared/NodeSourceTag";
 import { asArray } from "@/lib/asArray";
 import { cn } from "@/lib/cn";
 import { pickSources, type BrainEvent, type BrainGate } from "./content/brainLayout";
@@ -11,6 +12,8 @@ export interface BrainViewProps {
   events: BrainEvent[] | undefined;
   error?: string | null;
   large?: boolean;
+  /** "remote" when the VPS, as the trader, answered (2026-10-21). */
+  node?: string;
 }
 
 /**
@@ -21,7 +24,7 @@ export interface BrainViewProps {
  * comes from the backend's classification of the recorded reason, so a pulse
  * stops where the app really stopped the signal.
  */
-export function BrainView({ gates, events, error, large }: BrainViewProps) {
+export function BrainView({ gates, events, error, large, node }: BrainViewProps) {
   const g = asArray<BrainGate>(gates);
   const ev = asArray<BrainEvent>(events);
   const sources = useMemo(() => pickSources(ev), [ev]);
@@ -34,6 +37,8 @@ export function BrainView({ gates, events, error, large }: BrainViewProps) {
   const executed = ev.filter((e) => e.outcome === "executed").length;
 
   return (
+    <div className={cn("space-y-2", large && "h-full")}>
+    <NodeSourceTag node={node} what="these gates and decisions" />
     <div className={cn("grid gap-3", large ? "h-full lg:grid-cols-4" : "lg:grid-cols-3")}>
       <div className={cn("min-w-0", large ? "lg:col-span-3" : "lg:col-span-2")}>
         <div className="mb-1 flex flex-wrap items-center gap-3 text-[11px] text-ink-3">
@@ -55,6 +60,7 @@ export function BrainView({ gates, events, error, large }: BrainViewProps) {
       <div className={cn("min-w-0 overflow-auto", large ? "max-h-[78vh]" : "max-h-80")}>
         <BrainThoughts events={ev} gates={g} limit={large ? 30 : 14} />
       </div>
+    </div>
     </div>
   );
 }

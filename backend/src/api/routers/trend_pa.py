@@ -18,7 +18,10 @@ router = APIRouter(prefix="/api/engines/trend-pa", tags=["engines"])
 
 @router.get("/report")
 async def report() -> dict:
-    return await tpa_ctl.report()
+    try:
+        return await tpa_ctl.report()
+    except tpa_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc), status_code=503) from exc
 
 
 @router.post("/backtest")

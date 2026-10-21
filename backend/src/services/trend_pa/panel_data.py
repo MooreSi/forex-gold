@@ -59,6 +59,13 @@ def local_report() -> dict:
 
 
 async def report() -> dict:
+    """The VPS's own build when its engines generate (asked on demand since
+    2026-10-21; the broadcast copy is the fallback for an older VPS), else
+    this node's. Raises RemoteControlFailed rather than show this node's idle
+    engine in the VPS's place."""
+    from backend.src.services.cluster import peer_reports
+    if peer_reports.engines_on_peer():
+        return await peer_reports.trend_pa_from_engine_node()
     if _facade._is_remote_active():
         return {**_facade._remote_engine_stats("trend_pa"), "where": "remote"}
     return {**await to_db_thread(local_report), "where": "local"}

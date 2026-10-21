@@ -881,3 +881,34 @@ behind the first two are in `market/bar_clock.py`.
     beyond it. 9 of 1,147 replayed losses (2019 - Oct 2026), 0.004R a trade:
     not worth changing code the pre-registered trials share. The same replay:
     defaults, 1,755 trades, -0.135R.
+
+## The panels show the node whose engines generate (2026-10-21)
+
+With the VPS trading and centralized generation off, the engines analyse on
+the VPS only (`node_roles.engines_generate_here`). The React Signal Generator
+panels read this Mac's own engines, idle since the VPS took over, so "does it
+beat chance", the pro model, the ledger and the virtual trades all described a
+machine that was not generating. The VPS's periodic stats broadcast
+(`remote_stats_facade`) was only ever read by Trend PA.
+
+Now `/api/engines/{breakout,reversal}/report`, `/api/engines/trend-pa/report`
+and `/api/brain` ask the right node over the peer-report channel
+(`cluster/peer_reports.py`):
+
+* engines on the peer = `trader_is_peer() and not centralized`. Under
+  centralized generation the engines are here and the VPS's are idle.
+* Brain follows the TRADER, like Fill cost: its gates and decisions are the
+  trader's.
+* The panel builders stay in `api/routers/engines.py` (the existing route
+  tests patch the controller functions they call), and `api/server.py`
+  registers them as peer reports, so the VPS answers with exactly what its own
+  dashboard would show. A VPS on older code answers "unknown report", which
+  the panel turns into "update the VPS". Trend PA falls back to its broadcast
+  copy then, because that copy is the VPS's own data.
+* No fallback to this node's numbers: an unreachable VPS is a 503 and the
+  panel says so.
+* The reversal report now carries `pro_model`. `/state`'s is always this
+  machine's; the report's is the model of the node that built it.
+
+Not routed yet: "Retrain in the background" and "Run the research study" still
+act on this machine's engine.

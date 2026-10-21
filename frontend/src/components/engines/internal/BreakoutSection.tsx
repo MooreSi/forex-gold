@@ -1,3 +1,4 @@
+import { NodeSourceTag } from "@/components/shared/NodeSourceTag";
 import { useCallback } from "react";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -30,6 +31,8 @@ import { LearningChartSection } from "./LearningChartSection";
  * separate panels in this app ended up silently rendering em dashes.
  */
 interface BreakoutReport {
+  /** "remote" when the VPS built it (its engines are the ones generating). */
+  node?: string;
   stats: Record<string, unknown>;
   virtual_balance: number | null;
   max_drawdown: number | null;
@@ -147,6 +150,7 @@ export function BreakoutSection() {
 
   return (
     <div className="space-y-3">
+      <NodeSourceTag node={poll.data.node} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
         <Figure label="Signals" testId="bo-total" value={total ? String(total) : "—"}
           hint={num(stats["pending"]) ? `${num(stats["pending"])} still open` : undefined} />

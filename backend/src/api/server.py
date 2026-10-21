@@ -120,6 +120,16 @@ ROUTERS = (
 )
 
 
+# The Signal Generator panels, offered to the paired node by name
+# (services/cluster/peer_reports.py). Their builders are the routes' own, so
+# the VPS answers with exactly what its own dashboard would show. Registered at
+# import, like the routers above, so a VPS answers from the moment it serves.
+from backend.src.controllers import engines_controller as _engines_ctl  # noqa: E402
+
+_engines_ctl.register_panel_report("breakout_panel", engines_router.breakout_report_local)
+_engines_ctl.register_panel_report("reversal_panel", engines_router.reversal_report_local)
+
+
 def _default_reader_provider() -> Callable[[], Any]:
     """The Telegram reader handle, imported lazily for the same reason as the
     engine: building an app for a test must not start the application graph."""

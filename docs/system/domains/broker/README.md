@@ -676,3 +676,21 @@ starts and logins, and no errors. The app was killing it, 46 times between
   session since 15:11 has connected through it, and AS03 served ticks before. The
   original file is kept as `202610.tkc.bak-20261019`. `mt5_bridge.py` was not changed. It is a
   money surface and needs a demo session.
+
+## Why the Fill cost card is empty with the VPS trading (2026-10-21)
+
+The card already asks the VPS (`node: "remote"`), and the VPS answers "0
+measured fills in 14 days". The routing is fine. `execution_quality` is only
+written by the Reversal engine's manual Research study
+(`research_lab.measure_costs`), and nobody has run that on the VPS. The Mac's
+793 measured fills all stop on 2026-10-12, the day the VPS took over.
+
+**Not fixed automatically, on purpose.** A loop that priced new fills on the
+trading node was written and taken back out the same day. Each fill is two
+tick-history reads (`get_tick_at`), and the hang above shows one such read can
+freeze the bridge for 60-70s. On the VPS that is the bridge that trades.
+`mt5_native.get_tick_at` (the in-process Windows bridge) has no pause at all.
+A read refused during `MT5BridgeClient`'s pause also returns None, and
+`measure_costs` would then record that trade as unmeasurable for good. The
+owner has to decide whether this runs on the trading node, and when (for
+example only with the market closed).

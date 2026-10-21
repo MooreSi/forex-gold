@@ -139,8 +139,27 @@ async def _guarded(read, fallback):
         return fallback
 
 
+async def _from_engine_node(name: str, build_local) -> dict:
+    """The panel from the node whose engines are generating: this one, or the
+    VPS's own build of it (2026-10-21). An unreachable VPS is a 503, never
+    this node's stood-down engine in its place."""
+    try:
+        return await engines_ctl.panel_from_engine_node(name, build_local)
+    except engines_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc), status_code=503) from exc
+
+
 @router.get("/breakout/report")
 async def breakout_report() -> dict:
+    return await _from_engine_node("breakout_panel", breakout_report_local)
+
+
+@router.get("/reversal/report")
+async def reversal_report() -> dict:
+    return await _from_engine_node("reversal_panel", reversal_report_local)
+
+
+async def breakout_report_local() -> dict:
     """Everything the Breakout panel shows, in one read. Places nothing.
 
     One endpoint rather than nine: the panel reads them together on every
@@ -180,8 +199,7 @@ async def _reversal_ledger() -> list:
     return await asyncio.to_thread(reversal_ctl.reversal_shadow_ledger, LEDGER_LIMIT)
 
 
-@router.get("/reversal/report")
-async def reversal_report() -> dict:
+async def reversal_report_local() -> dict:
     """The Reversal engine's own measurements. Reads history, places nothing.
 
     `history` is the virtual trade ledger: one row per variant decision, with
@@ -218,6 +236,9 @@ async def reversal_report() -> dict:
             "metrics": await _guarded(reversal_ctl.reversal_ml_metrics, {}),
             "summary": await _guarded(reversal_ctl.reversal_ml_summary, {}),
         },
+        # Also on /state, which is always THIS node's. Here it is the model of
+        # whichever node built the report -- the VPS's when it generates.
+        "pro_model": reversal_ctl.pro_model_status(),
     }
 
 

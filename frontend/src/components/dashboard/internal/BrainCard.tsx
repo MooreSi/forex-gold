@@ -22,7 +22,7 @@ export function BrainCard() {
 
   const view = (large: boolean) => (
     <BrainView gates={poll.data?.gates} events={poll.data?.events}
-      error={poll.error?.message ?? null} large={large} />
+      error={poll.error?.message ?? null} large={large} node={poll.data?.node} />
   );
 
   if (full) {

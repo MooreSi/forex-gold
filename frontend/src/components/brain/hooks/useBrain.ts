@@ -7,6 +7,8 @@ export interface BrainSnapshot {
   now: number;
   gates: BrainGate[];
   events: BrainEvent[];
+  /** "remote" when the VPS, as the trader, answered. */
+  node?: string;
 }
 
 /** The brain's one read, every 3 seconds while it is on screen. */

@@ -34,6 +34,18 @@ describe("BrainView", () => {
     expect(screen.getByTestId("brain-gate-halt")).toHaveAttribute("data-blocking", "true");
   });
 
+  it("says when it is the VPS's brain (owner, 2026-10-21)", () => {
+    // With the VPS trading, the gates and decisions are the VPS's; the Mac's
+    // own describe a node placing no orders.
+    render(<BrainView gates={GATES} events={EVENTS} node="remote" />);
+    expect(screen.getByTestId("node-source")).toHaveTextContent(/VPS/);
+  });
+
+  it("draws no source line for this machine's own brain", () => {
+    render(<BrainView gates={GATES} events={EVENTS} />);
+    expect(screen.queryByTestId("node-source")).not.toBeInTheDocument();
+  });
+
   it("says so when nothing is holding orders", () => {
     render(<BrainView gates={GATES.map((g) => ({ ...g, blocking: false }))} events={EVENTS} />);
     expect(screen.getByTestId("brain-holding")).toHaveTextContent("No gate is holding orders right now.");

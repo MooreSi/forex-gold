@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from backend.src.api.errors import Refusal
 from backend.src.controllers import brain_controller as brain_ctl
 
 router = APIRouter(prefix="/api/brain", tags=["brain"])
@@ -15,4 +16,9 @@ router = APIRouter(prefix="/api/brain", tags=["brain"])
 
 @router.get("")
 async def snapshot() -> dict:
-    return await brain_ctl.snapshot_async()
+    # From the node that trades. An unreachable VPS is said, never replaced by
+    # this node's gates (2026-10-21).
+    try:
+        return await brain_ctl.snapshot_async()
+    except brain_ctl.RemoteControlFailed as exc:
+        raise Refusal(str(exc), status_code=503) from exc

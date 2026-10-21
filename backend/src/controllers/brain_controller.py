@@ -1,11 +1,15 @@
 """The brain view: recent entry decisions and the gates' state. Read-only.
-Forwards to backend.src.services.brain.feed unchanged."""
+Read from the node that trades (services/cluster/peer_reports.py), whose gates
+and decision log they are; this Mac's own describe a node placing no orders."""
 from __future__ import annotations
 
-from backend.src.services.brain import feed as _feed
+from backend.src.services.cluster import peer_reports as _reports
+from backend.src.services.cluster import remote_control as _remote
 
-__all__ = ["snapshot_async"]
+__all__ = ["snapshot_async", "RemoteControlFailed"]
+
+RemoteControlFailed = _remote.RemoteControlFailed
 
 
-async def snapshot_async(*args, **kwargs):
-    return await _feed.snapshot_async(*args, **kwargs)
+async def snapshot_async(limit: int = 60) -> dict:
+    return await _reports.brain_async(limit)

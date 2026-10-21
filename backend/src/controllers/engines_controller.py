@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.src.services.cluster import peer_reports as _reports
 from backend.src.services.cluster import remote_control as _remote
 from backend.src.services.engines import registry as _engines
 from backend.src.services.risk import settings as _risk
@@ -23,6 +24,7 @@ __all__ = [
     "ENGINE_NAMES", "ALL_NAMES", "IMPLEMENTED_NAMES", "SHOWN_NAMES", "control_target", "effective_settings",
     "set_engine_running", "set_ai_eval", "AI_EVAL_KEYS",
     "RemoteControlFailed", "place_market_order", "close_on_peer",
+    "panel_from_engine_node", "register_panel_report",
 ]
 
 
@@ -113,3 +115,15 @@ async def place_market_order(*args, **kwargs) -> dict:
 async def close_on_peer(trade_id: str, reason: str) -> dict:
     """Close a position the remote node opened, on the remote node."""
     return await _remote.close_on_peer(trade_id, reason)
+
+
+# ── Panels from the node whose engines are generating (2026-10-21) ───────────
+
+async def panel_from_engine_node(name: str, build_local) -> dict:
+    """This node's panel, or the VPS's build of it when its engines generate."""
+    return await _reports.panel_from_engine_node(name, build_local)
+
+
+def register_panel_report(name: str, build) -> None:
+    """Let the paired node ask for this panel by name. Composition root only."""
+    _reports.register(name, build)

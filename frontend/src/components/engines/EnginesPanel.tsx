@@ -17,6 +17,7 @@ import { ModelSection } from "./internal/ModelSection";
 import { LearningChartSection } from "./internal/LearningChartSection";
 import { ShadowSection } from "./internal/ShadowSection";
 import { TrendPaSection } from "./internal/TrendPaSection";
+import { NodeSourceTag } from "@/components/shared/NodeSourceTag";
 
 // Reversal first, and the one the page opens on. Owner, 2026-09-21: "this is
 // the main one" -- it is the engine that trades, and the one whose model,
@@ -30,7 +31,9 @@ const SUB_TABS = [
 
 export function EnginesPanel() {
   const c = useEnginesController();
-  const model = asObject(c.state.data?.pro_model);
+  // The report's model is the one of the node whose engine built it -- the
+  // VPS's when it generates. /state's is always this machine's.
+  const model = asObject(c.report.data?.pro_model ?? c.state.data?.pro_model);
 
   return (
     <PanelShell title="Signal Generator" subtitle="the engines that produce signals" icon="flask">
@@ -110,6 +113,13 @@ export function EnginesPanel() {
             </Tabs.Content>
 
             <Tabs.Content value="reversal" className="space-y-4">
+              <NodeSourceTag node={c.report.data?.node}
+                what="the benchmark, the pro model, the ledger and the virtual trades" />
+              {c.report.error && (
+                <p role="alert" className="rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  {c.report.error.message}
+                </p>
+              )}
               <LearningChartSection
                 metrics={asObject(asObject(c.report.data?.ml)["metrics"])}
                 summary={asObject(asObject(c.report.data?.ml)["summary"])}

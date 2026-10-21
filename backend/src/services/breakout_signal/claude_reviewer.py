@@ -110,13 +110,7 @@ async def review_signal(
     """
     try:
         import backend.src.config as _cfg_mod
-        cfg = {
-            "ai_provider":       _cfg_mod.get("ai_provider", "claude"),
-            "anthropic_api_key": _cfg_mod.get("anthropic_api_key", ""),
-            "claude_model":      _cfg_mod.get("claude_model", ""),
-            "deepseek_api_key":  _cfg_mod.get("deepseek_api_key", ""),
-            "deepseek_model":    _cfg_mod.get("deepseek_model", ""),
-        }
+        cfg = ai_provider.ai_cfg(_cfg_mod.get)
         prompt = _build_prompt(candidate, risk, context)
 
         text = await ai_provider.complete(cfg, _SYSTEM, prompt, max_tokens=120, timeout=20)

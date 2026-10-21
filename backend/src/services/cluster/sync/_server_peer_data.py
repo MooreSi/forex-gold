@@ -146,7 +146,15 @@ class ServerPeerDataMixin:
     # credential-free mechanism. anthropic_api_key deliberately excluded —
     # the VPS may have its own separately-provisioned Claude key/account and
     # this sync was only asked for to fix DeepSeek not reaching the VPS.
-    _AI_CONFIG_SYNC_KEYS = ("ai_provider", "claude_model", "deepseek_model", "deepseek_api_key")
+    # The OpenAI-protocol providers (2026-10-21) follow DeepSeek: model and
+    # key both, or picking one on the Mac switches the VPS to a provider it
+    # has no key for.
+    from backend.src.config import OPENAI_COMPATIBLE_PROVIDERS as _OAI
+    _AI_CONFIG_SYNC_KEYS = (
+        "ai_provider", "claude_model", "deepseek_model", "deepseek_api_key",
+        *(f"{p}_{k}" for p in _OAI for k in ("model", "api_key")),
+    )
+    del _OAI
 
     def _handle_ai_config_sync(self, msg: dict) -> None:
         updates = {k: v for k, v in (msg.get("updates") or {}).items()

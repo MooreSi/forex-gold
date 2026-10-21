@@ -1,7 +1,12 @@
 """Unified LLM provider abstraction — lets the rest of the app call a single
-`complete()` function without caring whether the configured provider is
-Claude (Anthropic) or DeepSeek. Selected via cfg["ai_provider"] ("claude" or
-"deepseek"), set from Settings > AI.
+`complete()` function without caring which provider is configured. Selected
+via cfg["ai_provider"] (one of PROVIDERS), set from Settings > AI.
+
+Claude and DeepSeek have their own adapters. Everything in OPENAI_COMPATIBLE
+(OpenAI, Google Gemini, xAI, Mistral, OpenRouter -- owner, 2026-10-21) speaks
+the OpenAI chat-completions protocol and shares one: adding another such
+provider is one registry entry. Each keeps `<name>_api_key`, `<name>_model`
+and `<name>_models_cache` in config.yaml.
 
 Only the "get text back from a system+user prompt" step is unified here —
 each caller in claude_ai.py keeps its own JSON-schema prompt, response
@@ -43,6 +48,66 @@ FALLBACK_DEEPSEEK_MODELS = [
 ]
 
 
+# Base URLs checked against each vendor's docs on 2026-10-21. `token_param`:
+# OpenAI's reasoning models refuse `max_tokens`. `headroom` is added to every
+# budget for providers whose models may reason before answering, because
+# reasoning spends the same budget and the call sites' budgets (5-2000) were
+# sized for answers alone -- DeepSeek's thinking switch exists for the same
+# reason. A cut-off reply still raises TruncatedResponseError.
+# Fallback lists are deliberately empty where no current model id could be
+# confirmed: the Settings tab then takes a typed id, and "Refresh models" asks
+# the vendor. A guessed id would be a dropdown entry that fails on first use.
+OPENAI_COMPATIBLE: dict[str, dict] = {
+    "openai": {"label": "OpenAI", "base_url": "https://api.openai.com/v1",
+               "token_param": "max_completion_tokens", "headroom": 2048,
+               "fallback": []},
+    "gemini": {"label": "Google Gemini",
+               "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+               "token_param": "max_tokens", "headroom": 2048,
+               "fallback": ["gemini-3.8-flash"]},
+    "xai": {"label": "xAI (Grok)", "base_url": "https://api.x.ai/v1",
+            "token_param": "max_tokens", "headroom": 2048, "fallback": []},
+    "mistral": {"label": "Mistral", "base_url": "https://api.mistral.ai/v1",
+                "token_param": "max_tokens", "headroom": 0, "fallback": []},
+    "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
+                   "token_param": "max_tokens", "headroom": 2048, "fallback": []},
+}
+
+PROVIDERS: tuple[str, ...] = ("claude", "deepseek", *OPENAI_COMPATIBLE)
+LABELS: dict[str, str] = {"claude": "Claude", "deepseek": "DeepSeek",
+                          **{k: v["label"] for k, v in OPENAI_COMPATIBLE.items()}}
+
+
+def key_field(provider: str) -> str:
+    """Claude's key is Anthropic's own name for it; every other is `<name>_api_key`."""
+    return "anthropic_api_key" if provider == "claude" else f"{provider}_api_key"
+
+
+def model_field(provider: str) -> str:
+    return f"{provider}_model"
+
+
+def fallback_models(provider: str) -> list[str]:
+    if provider == "claude":
+        return FALLBACK_CLAUDE_MODELS
+    if provider == "deepseek":
+        return FALLBACK_DEEPSEEK_MODELS
+    return list(OPENAI_COMPATIBLE.get(provider, {}).get("fallback", []))
+
+
+def ai_cfg(get) -> dict:
+    """The AI slice of a config, for call sites that build one by hand.
+
+    `get` is a `cfg.get`-shaped callable. Copies every provider's key and
+    model, so a caller cannot reach Claude and DeepSeek only.
+    """
+    out = {"ai_provider": get("ai_provider", "claude")}
+    for name in PROVIDERS:
+        out[key_field(name)] = get(key_field(name), "")
+        out[model_field(name)] = get(model_field(name), "")
+    return out
+
+
 class TruncatedResponseError(Exception):
     """Raised when the provider truncated its reply at max_tokens before
     finishing — callers that need a complete JSON object should treat this
@@ -52,8 +117,8 @@ class TruncatedResponseError(Exception):
 def is_configured(cfg: dict) -> bool:
     """Whether the currently-selected provider has what it needs to be called."""
     provider = cfg.get("ai_provider", "claude")
-    if provider == "deepseek":
-        return bool(cfg.get("deepseek_api_key"))
+    if provider == "deepseek" or provider in OPENAI_COMPATIBLE:
+        return bool(cfg.get(key_field(provider)))
     return _ANTHROPIC_AVAILABLE and bool(cfg.get("anthropic_api_key"))
 
 
@@ -68,8 +133,8 @@ def active_model(cfg: dict) -> str:
     `claude_model or deepseek_model` named Claude above every DeepSeek answer.
     """
     provider = cfg.get("ai_provider", "claude")
-    if provider == "deepseek":
-        return str(cfg.get("deepseek_model") or "")
+    if provider == "deepseek" or provider in OPENAI_COMPATIBLE:
+        return str(cfg.get(model_field(provider)) or "")
     return str(cfg.get("claude_model") or "")
 
 
@@ -86,6 +151,10 @@ async def complete(cfg: dict, system: str, prompt: str, max_tokens: int, timeout
     provider = cfg.get("ai_provider", "claude")
     if provider == "deepseek":
         return await _complete_deepseek(cfg, system, prompt, max_tokens, timeout)
+    if provider in OPENAI_COMPATIBLE:
+        messages = ([{"role": "system", "content": system}] if system else []) + \
+                   [{"role": "user", "content": prompt}]
+        return await _complete_openai_compatible(cfg, provider, messages, max_tokens, timeout)
     return await _complete_claude(cfg, system, prompt, max_tokens, timeout)
 
 
@@ -119,6 +188,9 @@ async def complete_vision(cfg: dict, system: str, prompt: str, images: list[byte
     provider = cfg.get("ai_provider", "claude")
     if provider == "deepseek":
         return await _complete_vision_deepseek(cfg, system, prompt, images, max_tokens, timeout)
+    if provider in OPENAI_COMPATIBLE:
+        return await _complete_openai_compatible(
+            cfg, provider, _vision_messages(system, prompt, images), max_tokens, timeout)
     return await _complete_vision_claude(cfg, system, prompt, images, max_tokens, timeout)
 
 
@@ -149,6 +221,44 @@ async def _complete_vision_claude(cfg: dict, system: str, prompt: str, images: l
     if getattr(resp, "stop_reason", None) == "max_tokens":
         raise TruncatedResponseError("Claude response truncated at max_tokens")
     return resp.content[0].text.strip()
+
+
+def _vision_messages(system: str, prompt: str, images: list[bytes]) -> list[dict]:
+    """The OpenAI-protocol user message with images inlined as data URLs."""
+    import base64
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    for img in images:
+        mime = _sniff_image_mime(img)
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{base64.b64encode(img).decode()}"},
+        })
+    return ([{"role": "system", "content": system}] if system else []) + \
+           [{"role": "user", "content": content}]
+
+
+async def _complete_openai_compatible(cfg: dict, provider: str, messages: list[dict],
+                                      max_tokens: int, timeout: int) -> str:
+    spec = OPENAI_COMPATIBLE[provider]
+    api_key = cfg.get(key_field(provider), "")
+    model = cfg.get(model_field(provider), "")
+    if not api_key:
+        raise RuntimeError(f"{spec['label']} not configured (missing API key)")
+    if not model:
+        raise RuntimeError(f"{spec['label']} has no model selected (Settings > AI)")
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            f"{spec['base_url']}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": model, "messages": messages,
+                  spec["token_param"]: max_tokens + spec["headroom"]},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    choice = data["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise TruncatedResponseError(f"{spec['label']} response truncated at max_tokens")
+    return (choice["message"].get("content") or "").strip()
 
 
 async def _complete_vision_deepseek(cfg: dict, system: str, prompt: str, images: list[bytes],
@@ -242,10 +352,27 @@ async def fetch_available_models(provider: str, api_key: str) -> list[str]:
     try:
         if provider == "deepseek":
             return await _fetch_deepseek_models(api_key)
+        if provider in OPENAI_COMPATIBLE:
+            return await _fetch_openai_compatible_models(provider, api_key)
         return await _fetch_claude_models(api_key)
     except Exception as e:
         log.warning("fetch_available_models(%s) failed, using fallback: %s", provider, e)
-        return FALLBACK_DEEPSEEK_MODELS if provider == "deepseek" else FALLBACK_CLAUDE_MODELS
+        return fallback_models(provider)
+
+
+async def _fetch_openai_compatible_models(provider: str, api_key: str) -> list[str]:
+    if not api_key:
+        return fallback_models(provider)
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{OPENAI_COMPATIBLE[provider]['base_url']}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    # Gemini's list names models "models/<id>"; the chat call wants "<id>".
+    ids = [str(m["id"]).removeprefix("models/") for m in data.get("data", []) if m.get("id")]
+    return ids or fallback_models(provider)
 
 
 async def _fetch_claude_models(api_key: str) -> list[str]:

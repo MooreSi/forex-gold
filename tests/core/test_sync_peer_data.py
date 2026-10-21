@@ -114,6 +114,16 @@ class TestTheAiConfigAllowlistIsTheWholeGuard:
 
         assert saved_yaml == [{"deepseek_model": "deepseek-chat"}]
 
+    @pytest.mark.parametrize("name", ["openai", "gemini", "xai", "mistral", "openrouter"])
+    async def test_a_new_providers_model_and_key_reach_the_vps(self, node, saved_yaml, name):
+        """Owner, 2026-10-21. Picking OpenAI on the Mac pushes
+        ai_provider=openai; without the key alongside, the VPS is switched to a
+        provider it cannot call. Same opt-in as DeepSeek's key (2026-07-08)."""
+        node._handle_ai_config_sync({"updates": {
+            f"{name}_model": "m", f"{name}_api_key": "k"}})
+
+        assert saved_yaml == [{f"{name}_model": "m", f"{name}_api_key": "k"}]
+
     async def test_an_empty_update_writes_nothing(self, node, saved_yaml):
         node._handle_ai_config_sync({"updates": {}})
         node._handle_ai_config_sync({})

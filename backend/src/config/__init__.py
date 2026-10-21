@@ -59,6 +59,8 @@ DB_PATH = DATA_DIR / "forex_trader_demo.db"  # fallback used only before load()
 
 _cfg: dict = {}
 
+OPENAI_COMPATIBLE_PROVIDERS = ("openai", "gemini", "xai", "mistral", "openrouter")
+
 
 def _load_yaml() -> dict:
     if not _YAML_AVAILABLE or not CONFIG_FILE.exists():
@@ -146,7 +148,7 @@ def load() -> dict:
         "starting_balance":   float(_e("STARTING_BALANCE", base.get("starting_balance", 1000.0))),
 
         # AI
-        "ai_provider":        _e("AI_PROVIDER", base.get("ai_provider", "claude")),  # "claude" | "deepseek"
+        "ai_provider":        _e("AI_PROVIDER", base.get("ai_provider", "claude")),  # one of provider.PROVIDERS
         "anthropic_api_key":  _e("ANTHROPIC_API_KEY", ""),
         "claude_model":       _claude_model(),
         "deepseek_api_key":   _e("DEEPSEEK_API_KEY", ""),
@@ -253,6 +255,14 @@ def load() -> dict:
             "REMOTE_ADMIN_CLIENT_ENABLED", base.get("remote_admin_client_enabled", True)
         )).lower() == "true",
     }
+
+    # The OpenAI-protocol providers (services/ai/provider.OPENAI_COMPATIBLE --
+    # config imports nothing, so the names are repeated here; a test pins the
+    # two lists together). No default model: the vendor's list supplies one.
+    for _p in OPENAI_COMPATIBLE_PROVIDERS:
+        _cfg[f"{_p}_api_key"] = _e(f"{_p.upper()}_API_KEY", "")
+        _cfg[f"{_p}_model"] = _e(f"{_p.upper()}_MODEL", "")
+        _cfg[f"{_p}_models_cache"] = base.get(f"{_p}_models_cache", [])
 
     # Derive DB path from account_env (must be after the dict is partially built).
     # Debug mode always gets its OWN file, independent of account_env, so a debug

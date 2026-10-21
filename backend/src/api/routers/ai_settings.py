@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from backend.src.api.errors import Refusal
 from backend.src.controllers import ai_controller as ai_ctl
@@ -36,23 +36,21 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai/settings", tags=["ai-settings"])
 
-PROVIDERS = ("claude", "deepseek")
-
-# Keys are `<provider>_api_key` except Claude's, which is Anthropic's own name
-# for it and is what every other part of this app already reads.
-KEY_FIELD = {"claude": "anthropic_api_key", "deepseek": "deepseek_api_key"}
-MODEL_FIELD = {"claude": "claude_model", "deepseek": "deepseek_model"}
+PROVIDERS = ai_ctl.PROVIDERS
 
 
 class AiSettingsWrite(BaseModel):
+    """`provider`, plus any `<provider>_model` and `<key field>` for a known
+    provider. Anything else is dropped before it can reach config.yaml."""
+    model_config = ConfigDict(extra="allow")
+
     provider: str | None = None
-    claude_model: str | None = None
-    deepseek_model: str | None = None
     # Blank means "keep the stored one", for the same reason as every other
     # secret here: the field is empty on screen whether or not one is set, so
     # passing it through would erase a working key on every unrelated edit.
-    anthropic_api_key: str | None = None
-    deepseek_api_key: str | None = None
+
+
+_WRITABLE = {f(p) for p in PROVIDERS for f in (ai_ctl.key_field, ai_ctl.model_field)}
 
 
 class ProviderRef(BaseModel):
@@ -72,18 +70,29 @@ def _require_known(provider: str) -> str:
 async def read() -> dict:
     """The provider, the models, and whether each key is stored."""
     cfg = settings_ctl.load_config() or {}
+    info = {
+        p: {
+            "label": ai_ctl.LABELS.get(p, p),
+            "model": cfg.get(ai_ctl.model_field(p)) or "",
+            "key_set": bool(cfg.get(ai_ctl.key_field(p))),
+            # Cached from the last successful refresh. Offered so the screen
+            # has something to choose from before anybody presses Refresh.
+            "models": list(cfg.get(f"{p}_models_cache") or ai_ctl.fallback_models(p)),
+        }
+        for p in PROVIDERS
+    }
     return {
         "provider": cfg.get("ai_provider") or "claude",
         "providers": list(PROVIDERS),
-        "claude_model": cfg.get("claude_model") or "",
-        "deepseek_model": cfg.get("deepseek_model") or "",
-        "anthropic_api_key_set": bool(cfg.get("anthropic_api_key")),
-        "deepseek_api_key_set": bool(cfg.get("deepseek_api_key")),
-        # Cached from the last successful refresh. Offered so the screen has
-        # something to choose from before anybody presses Refresh.
+        "provider_info": info,
+        # The flat Claude/DeepSeek fields predate provider_info and are kept
+        # for anything still reading them.
+        "claude_model": info["claude"]["model"],
+        "deepseek_model": info["deepseek"]["model"],
+        "anthropic_api_key_set": info["claude"]["key_set"],
+        "deepseek_api_key_set": info["deepseek"]["key_set"],
         "claude_models": list(cfg.get("claude_models_cache") or []),
-        "deepseek_models": list(cfg.get("deepseek_models_cache")
-                                or ai_ctl.FALLBACK_DEEPSEEK_MODELS),
+        "deepseek_models": info["deepseek"]["models"],
         "configured": ai_ctl.is_configured(cfg),
     }
 
@@ -91,9 +100,12 @@ async def read() -> dict:
 @router.put("")
 async def write(body: AiSettingsWrite) -> dict:
     """Save what was given, keep what was not, and tell the paired node."""
-    given = {k: v for k, v in body.model_dump().items() if v not in (None, "")}
+    given = {k: v for k, v in body.model_dump().items()
+             if k in _WRITABLE and isinstance(v, str) and v.strip()}
     if body.provider is not None:
-        _require_known(body.provider)
+        # `ai_provider` is the key every caller reads. Until 2026-10-21 this
+        # saved `provider`, which nothing read, so the dropdown changed nothing.
+        given["ai_provider"] = _require_known(body.provider)
     if not given:
         raise Refusal("Nothing to save.")
 
@@ -122,7 +134,7 @@ async def test(body: ProviderRef) -> dict:
     cfg = dict(settings_ctl.load_config() or {})
     cfg["ai_provider"] = provider
     if body.api_key:
-        cfg[KEY_FIELD[provider]] = body.api_key
+        cfg[ai_ctl.key_field(provider)] = body.api_key
     if not ai_ctl.is_configured(cfg):
         raise Refusal(f"No API key for {provider}. Enter one and try again.")
 
@@ -144,7 +156,7 @@ async def refresh_models(body: ProviderRef) -> dict:
     """
     provider = _require_known(body.provider)
     cfg = dict(settings_ctl.load_config() or {})
-    key = body.api_key or cfg.get(KEY_FIELD[provider]) or ""
+    key = body.api_key or cfg.get(ai_ctl.key_field(provider)) or ""
     if not key:
         raise Refusal(f"No API key for {provider}. Enter one and try again.")
 

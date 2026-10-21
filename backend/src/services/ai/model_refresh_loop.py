@@ -1,4 +1,4 @@
-"""Daily refresh of the Claude/DeepSeek model catalogues.
+"""Daily refresh of every keyed AI provider's model catalogue.
 
 Moved off the runtime in M4 B9e. The runtime keeps a shell that owns the
 asyncio task; this owns what the task does.
@@ -41,18 +41,13 @@ async def ai_model_refresh_loop(cfg: dict, is_running: Callable[[], bool]) -> No
     while is_running():
         try:
             updates: dict = {}
-            if cfg.get("anthropic_api_key"):
-                models = await ai_provider.fetch_available_models(
-                    "claude", cfg["anthropic_api_key"]
-                )
-                updates["claude_models_cache"] = models
-                cfg["claude_models_cache"] = models
-            if cfg.get("deepseek_api_key"):
-                models = await ai_provider.fetch_available_models(
-                    "deepseek", cfg["deepseek_api_key"]
-                )
-                updates["deepseek_models_cache"] = models
-                cfg["deepseek_models_cache"] = models
+            for name in ai_provider.PROVIDERS:
+                key = cfg.get(ai_provider.key_field(name))
+                if not key:
+                    continue
+                models = await ai_provider.fetch_available_models(name, key)
+                updates[f"{name}_models_cache"] = models
+                cfg[f"{name}_models_cache"] = models
             if updates:
                 updates["ai_models_last_refreshed"] = time.time()
                 cfg["ai_models_last_refreshed"] = updates["ai_models_last_refreshed"]

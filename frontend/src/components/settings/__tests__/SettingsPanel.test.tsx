@@ -899,6 +899,55 @@ describe("AI", () => {
 
     expect(await screen.findByLabelText("Model")).toHaveValue("claude-retired");
   });
+
+  describe("more providers (owner, 2026-10-21)", () => {
+    const withOpenAi = (models: string[], model = "") => ({
+      ...BODIES["/api/ai/settings"] as object,
+      provider: "openai",
+      providers: ["claude", "deepseek", "openai"],
+      provider_info: {
+        claude: { label: "Claude", model: "claude-sonnet-4-6", key_set: true, models: [] },
+        deepseek: { label: "DeepSeek", model: "", key_set: false, models: [] },
+        openai: { label: "OpenAI", model, key_set: false, models },
+      },
+    });
+
+    it("names each provider as the backend does", async () => {
+      overrides["/api/ai/settings"] = withOpenAi(["gpt-x"], "gpt-x");
+      await open();
+
+      expect(await screen.findByRole("option", { name: "OpenAI" })).toBeInTheDocument();
+      expect(within(screen.getByTestId("ai-provider-card")).getByText("OpenAI")).toBeInTheDocument();
+      expect(screen.getByLabelText("Model")).toHaveValue("gpt-x");
+      expect(screen.getByText("not set")).toBeInTheDocument();
+    });
+
+    it("saves the model and key under that provider's own names", async () => {
+      overrides["/api/ai/settings"] = withOpenAi(["gpt-x", "gpt-y"], "gpt-x");
+      await open();
+
+      await userEvent.selectOptions(await screen.findByLabelText("Model"), "gpt-y");
+      await userEvent.type(screen.getByLabelText("API key"), "sk-o");
+      await userEvent.click(screen.getByRole("button", { name: "Save key" }));
+
+      await waitFor(() => expect(writes()).toHaveLength(2));
+      expect(JSON.parse(writes()[0][1].body)).toEqual({ openai_model: "gpt-y" });
+      expect(JSON.parse(writes()[1][1].body)).toEqual({ openai_api_key: "sk-o" });
+    });
+
+    it("takes a typed model id when no list has been fetched yet", async () => {
+      // No fallback list is shipped for providers whose current ids could not
+      // be confirmed; without this the model could not be set at all.
+      overrides["/api/ai/settings"] = withOpenAi([]);
+      await open();
+
+      await userEvent.type(await screen.findByLabelText("Model id"), "gpt-z");
+      await userEvent.click(screen.getByRole("button", { name: "Use this model" }));
+
+      await waitFor(() => expect(writes()).toHaveLength(1));
+      expect(JSON.parse(writes()[0][1].body)).toEqual({ openai_model: "gpt-z" });
+    });
+  });
 });
 
 describe("access and licence", () => {

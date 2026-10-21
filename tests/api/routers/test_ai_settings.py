@@ -103,10 +103,15 @@ class TestReading:
 
 
 class TestWriting:
-    def test_it_saves_what_it_was_given(self, make_client, ai):
+    def test_it_saves_the_provider_under_the_key_the_app_reads(self, make_client, ai):
+        """Owner, 2026-10-21. This saved `provider`, which nothing reads: every
+        caller reads `ai_provider`. Picking a provider in the dashboard did
+        nothing, and the push sent the VPS a key its allowlist drops."""
         make_client().put("/api/ai/settings", json={"provider": "deepseek"})
 
-        assert ai["saved"] == [{"provider": "deepseek"}]
+        assert ai["saved"] == [{"ai_provider": "deepseek"}]
+        assert ai["pushed"] == [{"ai_provider": "deepseek"}]
+        assert make_client().get("/api/ai/settings").json()["provider"] == "deepseek"
 
     def test_a_blank_key_does_not_erase_the_stored_one(self, make_client, ai):
         """The field is empty on screen whether or not one is set, so passing
@@ -114,7 +119,7 @@ class TestWriting:
         make_client().put("/api/ai/settings",
                           json={"provider": "claude", "anthropic_api_key": ""})
 
-        assert ai["saved"] == [{"provider": "claude"}]
+        assert ai["saved"] == [{"ai_provider": "claude"}]
 
     def test_an_unknown_provider_is_refused(self, make_client, ai):
         res = make_client().put("/api/ai/settings", json={"provider": "oracle"})
@@ -234,3 +239,55 @@ def test_neither_is_reachable_by_a_get(path, make_client, ai):
     """Both cost money or make a network call."""
     assert make_client().get(path).status_code == 405
     assert ai["completions"] == []
+
+
+class TestMoreProviders:
+    """Owner, 2026-10-21: "add other AI providers and their available models
+    i.e. OpenAI but not limited to"."""
+
+    def test_it_offers_openai_and_more_with_their_names(self, make_client, ai):
+        body = make_client().get("/api/ai/settings").json()
+
+        assert {"openai", "gemini", "xai", "mistral", "openrouter"} <= set(body["providers"])
+        assert body["provider_info"]["openai"]["label"] == "OpenAI"
+
+    def test_each_provider_reports_its_own_model_list_and_key(self, make_client, ai):
+        ai["cfg"].update({"openai_api_key": "sk-o", "openai_model": "gpt-x",
+                          "openai_models_cache": ["gpt-x", "gpt-y"]})
+
+        res = make_client().get("/api/ai/settings")
+        info = res.json()["provider_info"]
+
+        assert info["openai"] == {"label": "OpenAI", "model": "gpt-x",
+                                  "key_set": True, "models": ["gpt-x", "gpt-y"]}
+        assert info["mistral"]["key_set"] is False
+        assert "sk-o" not in res.text
+
+    def test_it_saves_a_new_providers_key_and_model(self, make_client, ai):
+        make_client().put("/api/ai/settings", json={
+            "provider": "openai", "openai_api_key": "sk-o", "openai_model": "gpt-x"})
+
+        assert ai["saved"] == [{"ai_provider": "openai", "openai_api_key": "sk-o",
+                                "openai_model": "gpt-x"}]
+
+    def test_a_field_for_no_provider_is_not_written(self, make_client, ai):
+        """The body takes any `<provider>_model` / `_api_key`. Anything else must
+        not reach config.yaml through this route."""
+        res = make_client().put("/api/ai/settings", json={"mt5_password": "x"})
+
+        assert res.status_code == 409
+        assert ai["saved"] == []
+
+    def test_testing_a_new_provider_uses_its_own_key_field(self, make_client, ai):
+        make_client().post("/api/ai/settings/test",
+                           json={"provider": "openai", "api_key": "sk-typed"})
+
+        sent = ai["completions"][0]["cfg"]
+        assert sent["ai_provider"] == "openai"
+        assert sent["openai_api_key"] == "sk-typed"
+
+    def test_refreshing_caches_under_the_providers_own_name(self, make_client, ai):
+        make_client().post("/api/ai/settings/models",
+                           json={"provider": "gemini", "api_key": "k"})
+
+        assert ai["saved"] == [{"gemini_models_cache": ["m1", "m2"]}]

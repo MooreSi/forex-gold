@@ -6,9 +6,18 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { asArray } from "@/lib/asArray";
 import { useSettingsResource } from "../hooks/useSettingsResource";
 
+interface ProviderInfo {
+  label: string;
+  model: string;
+  key_set: boolean;
+  models: string[];
+}
+
 interface AiSettings {
   provider: string;
   providers: string[];
+  /** One entry per provider (2026-10-21). Older backends sent only the flat fields below. */
+  provider_info?: Record<string, ProviderInfo>;
   claude_model: string;
   deepseek_model: string;
   anthropic_api_key_set: boolean;
@@ -18,11 +27,20 @@ interface AiSettings {
   configured: boolean;
 }
 
-const LABEL: Record<string, string> = { claude: "Claude", deepseek: "DeepSeek" };
-const KEY_FIELD: Record<string, "anthropic_api_key" | "deepseek_api_key"> = {
-  claude: "anthropic_api_key",
-  deepseek: "deepseek_api_key",
-};
+/** Claude's key is Anthropic's own name for it; every other is `<name>_api_key`. */
+const keyField = (p: string) => (p === "claude" ? "anthropic_api_key" : `${p}_api_key`);
+
+function infoFor(data: AiSettings, p: string): ProviderInfo {
+  const given = data.provider_info?.[p];
+  if (given) return { ...given, models: asArray<string>(given.models) };
+  const claude = p === "claude";
+  return {
+    label: claude ? "Claude" : p === "deepseek" ? "DeepSeek" : p,
+    model: (claude ? data.claude_model : data.deepseek_model) ?? "",
+    key_set: claude ? data.anthropic_api_key_set : data.deepseek_api_key_set,
+    models: asArray<string>(claude ? data.claude_models : data.deepseek_models),
+  };
+}
 
 /**
  * Which model answers, and the key that lets it.
@@ -39,6 +57,7 @@ const KEY_FIELD: Record<string, "anthropic_api_key" | "deepseek_api_key"> = {
 export function AiTab() {
   const res = useSettingsResource<AiSettings>("/api/ai/settings");
   const [draftKey, setDraftKey] = useState("");
+  const [draftModel, setDraftModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -68,11 +87,10 @@ export function AiTab() {
     );
   }
 
-  const models = asArray<string>(
-    provider === "claude" ? data.claude_models : data.deepseek_models);
-  const model = provider === "claude" ? data.claude_model : data.deepseek_model;
-  const keyStored = provider === "claude"
-    ? data.anthropic_api_key_set : data.deepseek_api_key_set;
+  const info = infoFor(data, provider);
+  const { models, model } = info;
+  const keyStored = info.key_set;
+  const saveModel = (m: string) => res.save({ [`${provider}_model`]: m });
 
   return (
     <div className="space-y-4">
@@ -96,19 +114,19 @@ export function AiTab() {
           className="w-full max-w-xs rounded border border-line bg-surface-1 px-2 py-1 text-xs text-ink-1"
         >
           {asArray<string>(data.providers).map((p) => (
-            <option key={p} value={p}>{LABEL[p] ?? p}</option>
+            <option key={p} value={p}>{infoFor(data, p).label}</option>
           ))}
         </select>
         </Tooltip>
       </section>
 
       <section data-testid="ai-provider-card" className="rounded border border-line p-3">
-        <h3 className="text-xs font-semibold text-ink-1">{LABEL[provider] ?? provider}</h3>
+        <h3 className="text-xs font-semibold text-ink-1">{info.label}</h3>
 
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
           <label className="block text-xs text-ink-2">
             API key
-            <Tooltip label="This provider's key. It is stored encrypted and never shown again, so the box is blank even when one is set — leaving it blank keeps the stored key.">
+            <Tooltip label="This provider's key. It is saved in config.yaml on this machine (not encrypted) and never shown again, so the box is blank even when one is set — leaving it blank keeps the stored key.">
               <input
                 aria-label="API key"
                 type="password"
@@ -122,16 +140,14 @@ export function AiTab() {
             </span>
           </label>
 
+          {models.length > 0 || model ? (
           <label className="block text-xs text-ink-2">
             Model
             <Tooltip label="Which model this provider answers with. A bigger model costs more per call and every AI feature here is billable. A stored model the key can no longer use is still listed, so the box never shows a model you are not on.">
             <select
               aria-label="Model"
               value={model}
-              onChange={(e) => void res.save(
-                provider === "claude"
-                  ? { claude_model: e.target.value }
-                  : { deepseek_model: e.target.value })}
+              onChange={(e) => void saveModel(e.target.value)}
               className="mt-0.5 w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
             >
               {/* The stored value first, even when it is not in the fetched
@@ -143,6 +159,33 @@ export function AiTab() {
             </select>
             </Tooltip>
           </label>
+          ) : (
+          <div className="block text-xs text-ink-2">
+            {/* No list yet: nothing has been fetched for this key, and no
+                fallback is shipped where a current id could not be confirmed.
+                "Refresh models" fills the dropdown once a key is saved. */}
+            <label htmlFor="ai-model-id">Model id</label>
+            <div className="mt-0.5 flex gap-1">
+              <Tooltip label="The provider's own id for the model, exactly as its docs or model list give it. Once a key is saved, Refresh models fetches the list and this box becomes a dropdown.">
+              <input
+                id="ai-model-id"
+                value={draftModel}
+                onChange={(e) => setDraftModel(e.target.value)}
+                placeholder="save a key, then Refresh models"
+                className="w-full rounded border border-line bg-surface-1 px-2 py-1 text-ink-1"
+              />
+              </Tooltip>
+              <Button
+                variant="ghost"
+                disabled={!draftModel.trim()}
+                disabledReason={draftModel.trim() ? undefined : "Type a model id."}
+                onClick={() => { void saveModel(draftModel.trim()); setDraftModel(""); }}
+              >
+                Use this model
+              </Button>
+            </div>
+          </div>
+          )}
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -150,7 +193,7 @@ export function AiTab() {
             disabled={busy || !draftKey}
             disabledReason={draftKey ? undefined : "Type a key to save."}
             onClick={() => {
-              void res.save({ [KEY_FIELD[provider]]: draftKey });
+              void res.save({ [keyField(provider)]: draftKey });
               setDraftKey("");
               setNote({ ok: true, text: "Key saved." });
             }}

@@ -333,13 +333,7 @@ async def recommend(bridge, rs: Optional[dict] = None) -> dict:
     import backend.src.config as _cfg_mod
 
     evidence = await gather_evidence(bridge, rs)
-    cfg = {
-        "ai_provider":       _cfg_mod.get("ai_provider", "claude"),
-        "anthropic_api_key": _cfg_mod.get("anthropic_api_key", ""),
-        "claude_model":      _cfg_mod.get("claude_model", ""),
-        "deepseek_api_key":  _cfg_mod.get("deepseek_api_key", ""),
-        "deepseek_model":    _cfg_mod.get("deepseek_model", ""),
-    }
+    cfg = ai_provider.ai_cfg(_cfg_mod.get)
     if not ai_provider.is_configured(cfg):
         return {"settings": {}, "rationale": "", "evidence": evidence,
                 "error": "no AI provider is configured (Settings > AI)"}

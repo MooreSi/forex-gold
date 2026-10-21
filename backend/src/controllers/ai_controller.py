@@ -25,6 +25,11 @@ __all__ = [
     "complete",
     "fetch_available_models",
     "FALLBACK_DEEPSEEK_MODELS",
+    "PROVIDERS",
+    "LABELS",
+    "key_field",
+    "model_field",
+    "fallback_models",
     "request_commentary",
     "request_market_analysis",
     "run_market_research",
@@ -33,6 +38,23 @@ __all__ = [
 
 # Offered in Settings when the DeepSeek model list cannot be fetched live.
 FALLBACK_DEEPSEEK_MODELS = _provider.FALLBACK_DEEPSEEK_MODELS
+
+# Which providers Settings > AI offers, what each is called, and the config
+# keys each keeps its key and model under. Constants; touch nothing.
+PROVIDERS = _provider.PROVIDERS
+LABELS = _provider.LABELS
+
+
+def key_field(provider: str) -> str:
+    return _provider.key_field(provider)
+
+
+def model_field(provider: str) -> str:
+    return _provider.model_field(provider)
+
+
+def fallback_models(provider: str) -> list[str]:
+    return _provider.fallback_models(provider)
 
 
 def is_configured(cfg: dict) -> bool:

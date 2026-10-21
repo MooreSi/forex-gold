@@ -479,7 +479,7 @@ configuration with negative expectancy."""
         log.info(
             "channel_strategy_ai: evaluated %d channels (provider=%s model=%s)",
             len(results), cfg.get("ai_provider", "claude"),
-            cfg.get("claude_model") if cfg.get("ai_provider", "claude") != "deepseek" else cfg.get("deepseek_model"),
+            ai_provider.active_model(cfg),
         )
 
         # ── Telegram notification on strategy change for Auto channels ───────

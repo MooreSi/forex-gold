@@ -697,3 +697,5 @@ A read refused during `MT5BridgeClient`'s pause also returns None, and
 `measure_costs` would then record that trade as unmeasurable for good. The
 owner has to decide whether this runs on the trading node, and when (for
 example only with the market closed).
+
+**The "no trustworthy server-time offset" warning is logged once an hour, not per call (2026-10-21).** A Windows client logged it 401 times in about two hours (the evidence collector reads every 30s while the market is shut), enough to fill the 500-line tail the admin console's Diagnostics shows. `mt5_ticks.read_range` still returns None every time; only the log line is throttled (`_REFUSAL_LOG_EVERY_S`, cleared by `reset_offset_cache`). Pinned by `tests/broker/test_offset_refusal_is_logged_once.py`. Two findings from the same review were left alone on purpose: the Mac's 6-hourly tick-range hang is the designed back-off from the 2026-10-19 broker fault (a probe every 6h costs one ~60s stall, and no read has been answered since), and 19 `unknown` signals from 2026-09-28 to 09-30 sit in the hourly reconcile warning because closing them is a signal-lifecycle decision for the owner.

@@ -40,12 +40,19 @@ _HALF_HOUR_S = 1800.0
 _FRESH_S = 90.0
 _MAX_OFFSET_S = 14 * 3600.0
 
+# The refusal below is true on every call and says nothing new; a collector
+# asking every 30s logged it 401 times in two hours (2026-10-21) and pushed the
+# log's other warnings out of the admin console's diagnostics tail.
+_REFUSAL_LOG_EVERY_S = 3600.0
+
 _last_offset: Optional[float] = None
+_refusal_logged_at: Optional[float] = None
 
 
 def reset_offset_cache() -> None:
-    global _last_offset
+    global _last_offset, _refusal_logged_at
     _last_offset = None
+    _refusal_logged_at = None
 
 
 def server_offset(mt5: Any, symbol: str, now: float) -> Optional[float]:
@@ -77,8 +84,12 @@ def read_range(mt5: Any, symbol: str, from_ts: float, to_ts: float,
         return None
     offset = server_offset(mt5, symbol, time.time())
     if offset is None:
-        log.warning("_get_ticks_range: no trustworthy server-time offset yet "
-                    "(market closed since this process started?)")
+        global _refusal_logged_at
+        now = time.time()
+        if _refusal_logged_at is None or now - _refusal_logged_at >= _REFUSAL_LOG_EVERY_S:
+            _refusal_logged_at = now
+            log.warning("_get_ticks_range: no trustworthy server-time offset yet "
+                        "(market closed since this process started?)")
         return None
     try:
         start = datetime.fromtimestamp(float(from_ts) + offset, tz=timezone.utc)

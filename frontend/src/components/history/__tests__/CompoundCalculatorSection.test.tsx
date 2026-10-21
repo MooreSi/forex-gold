@@ -202,11 +202,15 @@ describe("the chart", () => {
 describe("losing days", () => {
   // Owner, 2026-10-08: a goal hit every day is not what an account does, so
   // some days a week lose the max daily drawdown, and the figures net it.
-  it("offers a max daily drawdown up to 20%, and losing days up to the trading days", () => {
+  // Owner, 2026-10-21: drawdown and daily goal go to 100%, and losing days
+  // come in quarters (1.25, 1.5 ...).
+  it("offers a max daily drawdown and daily goal up to 100%, and losing days up to the trading days", () => {
     render(<CompoundCalculatorSection balance={1000} />);
 
-    expect(screen.getByLabelText("Max daily drawdown (%) slider")).toHaveAttribute("max", "20");
+    expect(screen.getByLabelText("Max daily drawdown (%) slider")).toHaveAttribute("max", "100");
+    expect(screen.getByLabelText("Daily goal (%) slider")).toHaveAttribute("max", "100");
     expect(screen.getByLabelText("Losing days per week slider")).toHaveAttribute("max", "5");
+    expect(screen.getByLabelText("Losing days per week slider")).toHaveAttribute("step", "0.25");
 
     setField("Trading days per week", "3");
 

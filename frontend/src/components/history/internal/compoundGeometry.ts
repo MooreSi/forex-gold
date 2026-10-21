@@ -96,12 +96,15 @@ export function buildBalanceChart(
   let y: (v: number) => number;
   let yTicks: number[];
   if (log) {
+    // A 100% drawdown takes the balance to 0, which a log axis cannot show:
+    // it is floored a millionth of the top, so the line drops off the bottom.
+    const floor = Math.max(lo, hi * 1e-6, 1e-9);
     // A little headroom either side, so neither line sits on the frame.
-    const top = Math.log10(hi) + 0.02;
-    const bottom = Math.log10(lo) - 0.02;
+    const top = Math.log10(Math.max(hi, floor)) + 0.02;
+    const bottom = Math.log10(floor) - 0.02;
     const span = top - bottom || 1;
-    y = (v) => M.top + ((top - Math.log10(v)) / span) * plotH;
-    yTicks = logTicks(lo, hi);
+    y = (v) => M.top + ((top - Math.log10(Math.max(v, floor))) / span) * plotH;
+    yTicks = logTicks(floor, Math.max(hi, floor));
   } else {
     yTicks = niceTicks(0, hi);
     const top = Math.max(hi, ...yTicks);

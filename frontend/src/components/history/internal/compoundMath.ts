@@ -24,6 +24,11 @@
  * change the final balance; it does change the months, which split weeks. A
  * loss comes out of the account in full: "profit reinvested" is a share of
  * PROFIT, and a losing day has none to take out.
+ *
+ * **Part-days of losing** (owner, 2026-10-21). 1.25 losing days a week is an
+ * average, not a quarter of a day: week `k` loses `floor(k x L) - floor((k-1) x L)`
+ * whole days, so 1.25 runs 1, 1, 1, 2 and 1.5 runs 1, 2, 1, 2 -- five and six
+ * losing days in every four weeks. Each week's losses still fall at its end.
  */
 
 export const TRADING_WEEKS_PER_MONTH = 52 / 12;
@@ -40,7 +45,10 @@ export interface CompoundInputs {
   monthlyDeposit: number;
   /** Lost on each losing day, as a percent of that day's balance. */
   drawdownPct: number;
-  /** How many of each week's trading days lose `drawdownPct`, 0 to `daysPerWeek`. */
+  /**
+   * How many of each week's trading days lose `drawdownPct`, on average, 0 to
+   * `daysPerWeek`. A part-day is spread across weeks (see the module note).
+   */
   losingDays: number;
 }
 
@@ -82,13 +90,23 @@ function valid(i: CompoundInputs): boolean {
     i.reinvestPct, i.monthlyDeposit, i.drawdownPct, i.losingDays].every(Number.isFinite);
   return finite
     && i.capital > 0
-    && i.dailyPct > 0
+    && i.dailyPct > 0 && i.dailyPct <= 100
     && Number.isInteger(i.daysPerWeek) && i.daysPerWeek >= 1 && i.daysPerWeek <= 7
     && Number.isInteger(i.months) && i.months >= 1 && i.months <= 120
     && i.reinvestPct >= 0 && i.reinvestPct <= 100
     && i.monthlyDeposit >= 0
-    && i.drawdownPct >= 0 && i.drawdownPct < 100
-    && Number.isInteger(i.losingDays) && i.losingDays >= 0 && i.losingDays <= i.daysPerWeek;
+    && i.drawdownPct >= 0 && i.drawdownPct <= 100
+    && i.losingDays >= 0 && i.losingDays <= i.daysPerWeek;
+}
+
+/** `floor`, forgiving the float error in sums like 3 x 1.1. */
+const floorish = (x: number) => Math.floor(x + 1e-9);
+
+/** Whether trading day `day` (1-based, counted from the start) is a losing one. */
+export function isLosingDay(day: number, daysPerWeek: number, losingDays: number): boolean {
+  const week = Math.floor((day - 1) / daysPerWeek) + 1;
+  const thisWeek = floorish(week * losingDays) - floorish((week - 1) * losingDays);
+  return ((day - 1) % daysPerWeek) + 1 > daysPerWeek - thisWeek;
 }
 
 function periods(
@@ -120,7 +138,6 @@ export function project(i: CompoundInputs): Projection | null {
   const r = i.dailyPct / 100;
   const dd = i.drawdownPct / 100;
   const keep = i.reinvestPct / 100;
-  const firstLosing = i.daysPerWeek - i.losingDays + 1;
   const monthEnds = Array.from({ length: i.months },
     (_, m) => Math.round((m + 1) * i.daysPerWeek * TRADING_WEEKS_PER_MONTH));
   const days = monthEnds[monthEnds.length - 1];
@@ -130,7 +147,7 @@ export function project(i: CompoundInputs): Projection | null {
   const gain = [0], loss = [0], withdrawn = [0], deposit = [0];
   let bal = i.capital;
   for (let day = 1; day <= days; day++) {
-    const losing = ((day - 1) % i.daysPerWeek) + 1 >= firstLosing;
+    const losing = isLosingDay(day, i.daysPerWeek, i.losingDays);
     const profit = losing ? 0 : bal * r;
     const lost = losing ? bal * dd : 0;
     bal += profit * keep - lost;
@@ -183,30 +200,36 @@ const DOUBLING_WEEKS_CAP = 10_000;
  * Doubling is counted from the day the balance reaches 2x AND does not fall
  * back. With losses at the end of the week a balance can touch 2x on
  * Wednesday and be under it by Friday; the first touch would flatter the
- * plan. A growing week's lowest point after any day is its own close, and
- * every later week closes higher, so: find the first week that closes at 2x,
- * then the first day in it that is.
+ * plan. So it is simulated a day at a time, and the answer is the day after
+ * the last one under 2x.
+ *
+ * When to stop looking: over one full cycle of the losing-day pattern (`c`
+ * weeks, the fewest for which `c x L` is whole) the balance grows by `week^c`
+ * from wherever the cycle starts, so any stretch of days can fall by at most
+ * what part of one cycle can: `l^(c x L)`. Once the balance times that is 2x
+ * or more it can never again be under it.
  */
 export function rateEquivalents(
   dailyPct: number, daysPerWeek: number, drawdownPct = 0, losingDays = 0,
 ): RateEquivalents {
   const g = 1 + dailyPct / 100;
   const l = 1 - drawdownPct / 100;
+  // The average week: exact over a whole cycle of the losing-day pattern.
   const week = g ** (daysPerWeek - losingDays) * l ** losingDays;
   const pct = (weeks: number) => (week ** weeks - 1) * 100;
 
   let daysToDouble: number | null = null;
   if (week > 1) {
-    let start = 1;
-    for (let w = 0; w < DOUBLING_WEEKS_CAP && daysToDouble === null; w++) {
-      if (start * week >= 2) {
-        let bal = start;
-        for (let d = 1; d <= daysPerWeek; d++) {
-          bal *= d <= daysPerWeek - losingDays ? g : l;
-          if (bal >= 2) { daysToDouble = w * daysPerWeek + d; break; }
-        }
-      }
-      start *= week;
+    let cycle = 1;
+    while (cycle < 100 && Math.abs(cycle * losingDays - Math.round(cycle * losingDays)) > 1e-9) {
+      cycle++;
+    }
+    const worstDip = l ** Math.ceil(cycle * losingDays);
+    let bal = 1, lastBelow = 0;
+    for (let day = 1; day <= DOUBLING_WEEKS_CAP * daysPerWeek; day++) {
+      bal *= isLosingDay(day, daysPerWeek, losingDays) ? l : g;
+      if (bal < 2) lastBelow = day;
+      else if (bal * worstDip >= 2) { daysToDouble = lastBelow + 1; break; }
     }
   }
   return {

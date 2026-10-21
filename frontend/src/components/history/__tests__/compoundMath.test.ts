@@ -136,9 +136,9 @@ describe("what it refuses", () => {
     ["a blank box", { capital: NaN }],
     ["more losing days than trading days", { daysPerWeek: 3, losingDays: 4 }],
     ["negative losing days", { losingDays: -1 }],
-    ["part of a losing day", { losingDays: 1.5 }],
     ["a negative drawdown", { drawdownPct: -1 }],
-    ["a drawdown of the whole balance", { drawdownPct: 100 }],
+    ["a drawdown of more than the whole balance", { drawdownPct: 101 }],
+    ["a daily goal over 100%", { dailyPct: 101 }],
   ])("returns nothing for %s", (_name, over) => {
     expect(project(inputs(over))).toBeNull();
   });
@@ -261,5 +261,59 @@ describe("the break-even point", () => {
 
   it("has no break-even goal when every trading day loses", () => {
     expect(breakEven(1, 5, 2, 5).minDailyPct).toBeNull();
+  });
+});
+
+describe("part-days of losing (owner, 2026-10-21)", () => {
+  // 1.25 losing days a week is one losing day in three weeks of four and two
+  // in the fourth: five in every four weeks.
+  it("spreads 1.25 losing days a week as 1, 1, 1, 2", () => {
+    const p = project(inputs({ losingDays: 1.25, drawdownPct: 2, months: 2 }))!;
+    const one = 1.01 ** 4 * 0.98;
+    const two = 1.01 ** 3 * 0.98 ** 2;
+
+    expect(p.weeks[0].end).toBeCloseTo(1000 * one, 6);
+    expect(p.weeks[2].end).toBeCloseTo(1000 * one ** 3, 6);
+    expect(p.weeks[3].end).toBeCloseTo(1000 * one ** 3 * two, 6);
+  });
+
+  it("spreads 1.5 as 1, 2, 1, 2", () => {
+    const p = project(inputs({ losingDays: 1.5, drawdownPct: 2 }))!;
+    const one = 1.01 ** 4 * 0.98;
+    const two = 1.01 ** 3 * 0.98 ** 2;
+
+    expect(p.weeks[0].end).toBeCloseTo(1000 * one, 6);
+    expect(p.weeks[1].end).toBeCloseTo(1000 * one * two, 6);
+    expect(p.weeks[3].end).toBeCloseTo(1000 * (one * two) ** 2, 6);
+  });
+
+  it("nets the average losing days into the weekly rate", () => {
+    const r = rateEquivalents(1, 5, 2, 1.25);
+    expect(r.weeklyPct).toBeCloseTo((1.01 ** 3.75 * 0.98 ** 1.25 - 1) * 100, 6);
+  });
+
+  it("counts doubling from the day the uneven weeks stop dipping under 2x", () => {
+    // Simulated by hand: the same 1/1/1/2 pattern, last day under 2x + 1.
+    let bal = 1, lastBelow = 0;
+    for (let day = 1; day <= 2000; day++) {
+      const week = Math.floor((day - 1) / 5) + 1;
+      const n = Math.floor(week * 1.25) - Math.floor((week - 1) * 1.25);
+      bal *= ((day - 1) % 5) + 1 > 5 - n ? 0.97 : 1.02;
+      if (bal < 2) lastBelow = day;
+    }
+    expect(rateEquivalents(2, 5, 3, 1.25).daysToDouble).toBe(lastBelow + 1);
+  });
+});
+
+describe("the widened ranges (owner, 2026-10-21)", () => {
+  it("projects a 100% daily goal", () => {
+    const p = project(inputs({ dailyPct: 100, months: 1 }))!;
+    expect(p.weeks[0].end).toBeCloseTo(1000 * 2 ** 5, 6);
+  });
+
+  it("projects a 100% drawdown as the account going to zero", () => {
+    const p = project(inputs({ drawdownPct: 100, losingDays: 1 }))!;
+    expect(p.weeks[0].end).toBe(0);
+    expect(rateEquivalents(1, 5, 100, 1).daysToDouble).toBeNull();
   });
 });

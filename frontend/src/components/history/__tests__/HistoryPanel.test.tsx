@@ -20,7 +20,9 @@ function state(over: Partial<HistoryState> = {}): HistoryState {
       { source: "GoldSignals", trades: 20, wins: 12, win_rate: 60, net_pnl: 310, paused: false },
       { source: "NoisyChannel", trades: 9, wins: 2, win_rate: 22.2, net_pnl: -88, paused: true },
     ],
-    ladder: { scale_out: { reach: 2.4, n: 18 } },
+    // The shape get_strategy_ladder_reach sends. This fixture once used a
+    // `reach` field the backend never sent, which is how the blank column shipped.
+    ladder: { scale_out: { avg_rung: 2.4, n: 18 } },
     ...over,
   };
 }
@@ -247,7 +249,7 @@ describe("ladder reach", () => {
     render(<HistoryPanel />);
     await userEvent.click(await screen.findByRole("tab", { name: "Ladder reach" }));
 
-    expect(screen.getByText("TP 2.4")).toBeInTheDocument();
+    expect(screen.getByText("TP 2.40")).toBeInTheDocument();
     expect(screen.getByText("18")).toBeInTheDocument();
   });
 });

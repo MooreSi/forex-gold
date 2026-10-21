@@ -52,7 +52,9 @@ function balanceText(balance: number | null): string {
 /** The first box that is wrong, in the words the owner would use. */
 function problem(i: CompoundInputs): string | null {
   if (!Number.isFinite(i.capital) || i.capital <= 0) return "Enter a starting capital above zero.";
-  if (!Number.isFinite(i.dailyPct) || i.dailyPct <= 0) return "Enter a daily goal above 0%.";
+  if (!Number.isFinite(i.dailyPct) || i.dailyPct <= 0 || i.dailyPct > 100) {
+    return "The daily goal is a percentage above 0 and up to 100.";
+  }
   if (!Number.isInteger(i.daysPerWeek) || i.daysPerWeek < 1 || i.daysPerWeek > 7) {
     return "Trading days per week is a whole number from 1 to 7.";
   }
@@ -65,11 +67,11 @@ function problem(i: CompoundInputs): string | null {
   if (!Number.isFinite(i.monthlyDeposit) || i.monthlyDeposit < 0) {
     return "The monthly deposit cannot be negative.";
   }
-  if (!Number.isFinite(i.drawdownPct) || i.drawdownPct < 0 || i.drawdownPct >= 100) {
-    return "The max daily drawdown is a percentage from 0 to below 100.";
+  if (!Number.isFinite(i.drawdownPct) || i.drawdownPct < 0 || i.drawdownPct > 100) {
+    return "The max daily drawdown is a percentage from 0 to 100.";
   }
-  if (!Number.isInteger(i.losingDays) || i.losingDays < 0 || i.losingDays > i.daysPerWeek) {
-    return "Losing days per week is a whole number from 0 to the trading days per week.";
+  if (!Number.isFinite(i.losingDays) || i.losingDays < 0 || i.losingDays > i.daysPerWeek) {
+    return "Losing days per week is from 0 to the trading days per week (1.25, 1.5 and so on are averages).";
   }
   return null;
 }

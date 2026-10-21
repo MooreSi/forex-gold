@@ -31,7 +31,8 @@ def _signal(conn, trade_id, created_at):
 
 
 def _trade(conn, trade_id, strategy, *, max_tp_hit, exit_reason="SL",
-           pnl=10.0, close_time=None, status="closed"):
+           pnl=10.0, close_time=None, status="closed", tps=(), close_price=2410.0,
+           direction="BUY"):
     close_time = time.time() if close_time is None else close_time
     _signal(conn, trade_id, close_time - 120)
     conn.execute(
@@ -40,10 +41,13 @@ def _trade(conn, trade_id, strategy, *, max_tp_hit, exit_reason="SL",
         " lot_size, remaining_lots, stop_loss, status, open_time, close_time, close_price, "
         " net_pnl, strategy, max_tp_hit, exit_reason) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (trade_id, f"sig-{trade_id}", 1000, "BUY", 2399.0, 2401.0, 2400.0,
-         0.1, 0.1, 2395.0, status, close_time - 60, close_time, 2410.0,
+        (trade_id, f"sig-{trade_id}", 1000, direction, 2399.0, 2401.0, 2400.0,
+         0.1, 0.1, 2395.0, status, close_time - 60, close_time, close_price,
          pnl, strategy, max_tp_hit, exit_reason),
     )
+    for i, tp in enumerate(tps, start=1):
+        conn.execute(f"UPDATE vantage_simulated_trades SET tp{i}=? WHERE trade_id=?",
+                     (tp, trade_id))
 
 
 def test_reach_buckets_split_the_ladder_by_depth(fresh_db):
@@ -171,3 +175,47 @@ def test_open_trades_are_not_counted(fresh_db):
 def test_empty_database_returns_no_rows_rather_than_raising(fresh_db):
     """This feeds a prompt. It must never be the reason an analysis fails."""
     assert fresh_db.get_strategy_ladder_reach() == {}
+
+
+def test_a_missing_rung_is_read_from_how_far_the_close_got(fresh_db):
+    """Owner, 2026-10-21: "ladder reach doesn't look to be working". In the
+    demo database 24 closed trades had no max_tp_hit at all although their
+    close price was at or past TP1 -- 12 of them with exit_reason
+    'all_tps_hit'. Read as "no TP" they made every ladder look shallower than
+    it was. The rung the close price reached is a floor on the real one."""
+    with fresh_db.db() as conn:
+        # BUY, TPs 2402/2404/2406/2408, closed at 2407: past TP3, short of TP4.
+        _trade(conn, "buy", "s", max_tp_hit="none", exit_reason="all_tps_hit",
+               tps=(2402.0, 2404.0, 2406.0, 2408.0), close_price=2407.0)
+        # SELL, TPs 2398/2396, closed at 2396: TP2 exactly.
+        _trade(conn, "sell", "s", max_tp_hit=None, direction="SELL",
+               tps=(2398.0, 2396.0), close_price=2396.0)
+        # BUY stopped out below TP1: still no TP.
+        _trade(conn, "lost", "s", max_tp_hit="none", pnl=-60.0,
+               tps=(2402.0, 2404.0), close_price=2395.0)
+
+    row = fresh_db.get_strategy_ladder_reach(min_n=1)["s"]
+
+    assert row["no_tp"] == 1
+    assert row["tp1_2"] == 1
+    assert row["tp3_4"] == 1
+    assert row["top_rung"] == 3
+
+
+def test_a_recorded_rung_is_never_lowered_by_the_close_price(fresh_db):
+    """A trade that banked TP4 and was trailed back to TP1 reached TP4."""
+    with fresh_db.db() as conn:
+        _trade(conn, "t", "s", max_tp_hit="TP4",
+               tps=(2402.0, 2404.0, 2406.0, 2408.0), close_price=2402.5)
+
+    assert fresh_db.get_strategy_ladder_reach(min_n=1)["s"]["top_rung"] == 4
+
+
+def test_average_reach_is_the_mean_rung_including_the_no_tp_trades(fresh_db):
+    """What the Analysis tab's "Average reach" column shows. It was blank for
+    every strategy: the page read a 'reach' field nothing ever sent."""
+    with fresh_db.db() as conn:
+        for i, rung in enumerate(["TP1", "TP3", "none", "TP4"]):
+            _trade(conn, f"t{i}", "s", max_tp_hit=rung)
+
+    assert fresh_db.get_strategy_ladder_reach(min_n=1)["s"]["avg_rung"] == 2.0

@@ -90,7 +90,7 @@ export function CompoundInputsForm({ c, balance }: {
   const specs: Spec[] = [
     { name: "capital", label: "Starting capital", min: 100, max: capitalMax(balance), step: 100,
       prefix: "$", hint: "What the account starts with." },
-    { name: "dailyPct", label: "Daily goal (%)", min: 0.05, max: 5, step: 0.05, unit: "%",
+    { name: "dailyPct", label: "Daily goal (%)", min: 0.05, max: 100, step: 0.05, unit: "%",
       hint: "Profit aimed for each trading day, as a percent of that day's balance." },
     { name: "daysPerWeek", label: "Trading days per week", min: 1, max: 7, step: 1,
       hint: "How many days a week the goal is traded for." },
@@ -100,10 +100,10 @@ export function CompoundInputsForm({ c, balance }: {
       hint: "Share of each day's profit left in the account. The rest is taken out and stops compounding." },
     { name: "monthlyDeposit", label: "Monthly deposit", min: 0, max: 5000, step: 50, prefix: "$",
       hint: "Paid in at the end of every month." },
-    { name: "drawdownPct", label: "Max daily drawdown (%)", min: 0.05, max: 20, step: 0.05, unit: "%",
+    { name: "drawdownPct", label: "Max daily drawdown (%)", min: 0.05, max: 100, step: 0.05, unit: "%",
       hint: "Lost on each losing day, as a percent of that day's balance. The dollar figure moves with the account." },
-    { name: "losingDays", label: "Losing days per week", min: 0, max: tradingDays, step: 1,
-      hint: "How many of each week's trading days hit the max daily drawdown. They fall at the end of the week." },
+    { name: "losingDays", label: "Losing days per week", min: 0, max: tradingDays, step: 0.25,
+      hint: "How many of each week's trading days hit the max daily drawdown, on average: 1.25 is one a week with a second every fourth week. They fall at the end of the week." },
   ];
 
   return (

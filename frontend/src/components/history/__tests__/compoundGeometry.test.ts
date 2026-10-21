@@ -54,6 +54,14 @@ describe("buildBalanceChart", () => {
     expect(g.yTicks.every((t) => t.value > 0)).toBe(true);
   });
 
+  it("draws an account a 100% drawdown took to zero without breaking the log axis", () => {
+    const wiped = { goal: [1000, 1010, 0, 0], half: [1000, 1005, 0, 0], paid: [1000, 1000, 1000, 1000] };
+    const g = buildBalanceChart(wiped, [3], true);
+
+    expect(g.points.goal.every((p) => Number.isFinite(p.y))).toBe(true);
+    expect(g.yTicks.every((t) => Number.isFinite(t.value) && t.value > 0)).toBe(true);
+  });
+
   it("labels the months along the bottom", () => {
     const g = buildBalanceChart(series, [1, 2, 3], false);
 

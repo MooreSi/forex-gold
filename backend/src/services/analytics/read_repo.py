@@ -350,6 +350,26 @@ def _rung_index(max_tp_hit) -> int:
         return 0
 
 
+def _close_rung(direction, close_price, tps) -> int:
+    """The deepest TP the close price is at or beyond: a floor on the rung reached.
+
+    For trades whose max_tp_hit was never written (owner, 2026-10-21: 24 in
+    the demo database closed at or past TP1 with no rung, 12 of them
+    'all_tps_hit'). Price may have gone further and come back, so this can
+    only understate -- which is the safe side for a number about ladder depth.
+    """
+    if close_price is None:
+        return 0
+    buy = str(direction or "").upper() == "BUY"
+    rung = 0
+    for i, tp in enumerate(tps, start=1):
+        if tp is None:
+            break
+        if (close_price >= tp) if buy else (close_price <= tp):
+            rung = i
+    return rung
+
+
 def get_strategy_ladder_reach(days: int = 30, min_n: int = 5) -> dict[str, dict]:
     """How far up its TP ladder each strategy's trades ACTUALLY get.
 
@@ -367,8 +387,12 @@ def get_strategy_ladder_reach(days: int = 30, min_n: int = 5) -> dict[str, dict]
     `stopped_after_tp` is the truncation signature: a rung was banked and the
     trade then exited on a stop. Those are WINS, so win rate cannot show it.
 
+    A trade with no max_tp_hit recorded is credited the rung its close price
+    reached (`_close_rung`); a recorded rung is never lowered by it.
+
     Returns {strategy: {n, win_rate, net_pnl, no_tp, tp1_2, tp3_4, tp5_plus,
-    stopped_after_tp, top_rung}}, strategies under `min_n` trades dropped.
+    stopped_after_tp, top_rung, avg_rung}}, strategies under `min_n` trades
+    dropped. `avg_rung` is the mean rung reached, no-TP trades counting 0.
     Never raises: this feeds a prompt, and a failure must cost the evidence,
     not the analysis.
     """
@@ -378,7 +402,8 @@ def get_strategy_ladder_reach(days: int = 30, min_n: int = 5) -> dict[str, dict]
     try:
         with db() as conn:
             rows = conn.execute(
-                "SELECT strategy, max_tp_hit, exit_reason, net_pnl "
+                "SELECT strategy, max_tp_hit, exit_reason, net_pnl, direction, "
+                "close_price, tp1, tp2, tp3, tp4, tp5, tp6, tp7, tp8 "
                 "FROM vantage_simulated_trades "
                 "WHERE status='closed' AND close_time >= ? AND strategy IS NOT NULL",
                 (cutoff,),
@@ -387,14 +412,16 @@ def get_strategy_ladder_reach(days: int = 30, min_n: int = 5) -> dict[str, dict]
         log.warning("strategy ladder reach unavailable: %s", exc)
         return {}
 
-    for strategy, max_tp_hit, exit_reason, net_pnl in rows:
+    for strategy, max_tp_hit, exit_reason, net_pnl, direction, close_price, *tps in rows:
         r = acc.setdefault(str(strategy), {
             "n": 0, "wins": 0, "net_pnl": 0.0, "no_tp": 0, "tp1_2": 0,
             "tp3_4": 0, "tp5_plus": 0, "stopped_after_tp": 0, "top_rung": 0,
+            "rung_sum": 0,
         })
         pnl  = float(net_pnl or 0.0)
-        rung = _rung_index(max_tp_hit)
+        rung = _rung_index(max_tp_hit) or _close_rung(direction, close_price, tps)
         r["n"] += 1
+        r["rung_sum"] += rung
         r["net_pnl"] += pnl
         if pnl > 0:
             r["wins"] += 1
@@ -427,6 +454,7 @@ def get_strategy_ladder_reach(days: int = 30, min_n: int = 5) -> dict[str, dict]
             "tp5_plus":         r["tp5_plus"],
             "stopped_after_tp": r["stopped_after_tp"],
             "top_rung":         r["top_rung"],
+            "avg_rung":         round(r["rung_sum"] / r["n"], 2),
         }
     return out
 

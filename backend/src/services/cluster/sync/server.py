@@ -44,6 +44,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_SETTINGS_REJECTED, MSG_CHANNEL_STRATEGY_PROPOSE, MSG_CHANNEL_STRATEGY_STATE,
     MSG_STAND_DOWN, MSG_STAND_DOWN_ACK, MSG_RESUME,
     MSG_RESUME_ACK, MSG_TRADE_CLOSED, MSG_LEDGER_PULL, MSG_LEDGER_PUSH,
+    LEDGER_PUSH_CHUNK_BYTES,
     MSG_MODEL_SNAPSHOT_REQUEST, MSG_MODEL_SNAPSHOT_UPLOAD,
     MSG_MODEL_SNAPSHOT_BEGIN, MSG_MODEL_SNAPSHOT_END,
     MSG_ENGINE_CONTROL, MSG_ENGINE_CONTROL_ACK,
@@ -677,7 +678,18 @@ class SyncServer(TelemetryMixin, ServerPeerDataMixin, ServerExpertParamsMixin,
 
     async def _handle_ledger_pull(self, ws) -> None:
         rows = db_module.get_consolidated_trades(days=0)
-        await ws.send(json.dumps(make(MSG_LEDGER_PUSH, trades=rows)))
+        # Several frames, each under the peer's limit; the receiver upserts per
+        # row, so the split is invisible to it. An empty ledger is one frame.
+        batch, size = [], 0
+        for row in rows:
+            n = len(json.dumps(row)) + 2
+            if batch and size + n > LEDGER_PUSH_CHUNK_BYTES:
+                await ws.send(json.dumps(make(MSG_LEDGER_PUSH, trades=batch)))
+                batch, size = [], 0
+            batch.append(row)
+            size += n
+        if batch or not rows:
+            await ws.send(json.dumps(make(MSG_LEDGER_PUSH, trades=batch)))
 
     async def push_own_trade_closed(self, trade: dict) -> None:
         """Call from this node's own close-trade paths so the local closure

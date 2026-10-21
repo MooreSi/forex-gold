@@ -43,7 +43,7 @@ from backend.src.services.cluster.sync.protocol import (
     MSG_AI_RECOVERED_SIGNAL_SYNC, MSG_AI_RECOVERED_PULL, MSG_AI_RECOVERED_PUSH,
     MSG_TRADING_SCHEDULE_PROPOSE, MSG_TRADING_SCHEDULE_STATE,
     MSG_STRATEGY_PARAMS_PROPOSE, MSG_STRATEGY_PARAMS_STATE, MSG_EXPERT_PARAMS_STATE, MSG_MT5_ACCOUNTS_ACK,
-    CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
+    MAX_FRAME_BYTES, CONN_DISCONNECTED, CONN_CONNECTING, CONN_CONNECTED, CONN_REJECTED,
     TRADER_LOCAL, TRADER_REMOTE_VPS, make,
 )
 from backend.src.services.risk import clock as _clock
@@ -203,7 +203,8 @@ class SyncClient(PendingStoreMixin, PeerDataMixin, ClientBaselineMixin, ClientEx
         # opening handshake" churn seen in the logs (reconnecting every
         # 15-90s for hours). 60s gives real headroom without materially
         # slowing detection of an actually-dead connection.
-        async with websockets.connect(uri, ssl=ctx, ping_interval=20, ping_timeout=60) as ws:
+        async with websockets.connect(uri, ssl=ctx, ping_interval=20, ping_timeout=60,
+                                  max_size=MAX_FRAME_BYTES) as ws:
             # bugs/014: the context above does not verify the peer, so this is
             # the only thing standing between an intercepted connection and
             # the shared token. It MUST come before the send below -- pinning

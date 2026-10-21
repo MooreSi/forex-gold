@@ -271,3 +271,23 @@ class TestUnconfirmedLocalChangesSurviveAReconnect:
         await asyncio.sleep(0)
 
         assert flushed == []
+
+
+class TestAFrameBiggerThanTheDefaultLimitIsAccepted:
+    """2026-10-18: the VPS answers a ledger pull with the whole consolidated
+    ledger in one frame, which passed 1 MiB (the websockets default), so the
+    Mac closed the link with 1009 on every connect and reconnected forever."""
+
+    async def test_connect_raises_the_frame_limit_above_one_mebibyte(
+            self, client, monkeypatch, welcome):
+        monkeypatch.setattr(tls_util, "verify_or_pin", lambda h, f: (True, ""))
+        seen = {}
+
+        def _connect(*a, **kw):
+            seen.update(kw)
+            return _Ws([welcome])
+        monkeypatch.setattr(websockets, "connect", _connect)
+
+        await client._connect_once()
+
+        assert seen.get("max_size", 2 ** 20) > 2 ** 20

@@ -104,6 +104,21 @@ class TestBroadcasting:
         await node._broadcast({"type": "x"})
 
 
+class TestALargeLedgerIsSentInFramesUnderTheLimit:
+    async def test_every_frame_fits_and_no_row_is_lost(self, node, monkeypatch):
+        rows = [{"trade_id": f"t{i}", "pad": "x" * 600} for i in range(5000)]
+        monkeypatch.setattr(ss.db_module, "get_consolidated_trades",
+                            lambda days: rows)
+        ws = _Ws()
+
+        await node._handle_ledger_pull(ws)
+
+        raw = [json.dumps(m) for m in ws.sent]
+        assert max(len(r) for r in raw) < 2 ** 20
+        assert all(m["type"] == MSG_LEDGER_PUSH for m in ws.sent)
+        assert [t for m in ws.sent for t in m["trades"]] == rows
+
+
 class TestTheConsolidatedLedger:
     async def test_a_closed_trade_is_recorded(self, node, ledger):
         node._handle_trade_closed({"node_id": "mac", "trade": {"trade_id": "t1"}})

@@ -225,6 +225,14 @@ MSG_MODEL_SNAPSHOT_BEGIN   = "model_snapshot_begin"    # sender -> receiver: man
 MSG_MODEL_SNAPSHOT_END     = "model_snapshot_end"      # sender -> receiver: transfer complete
 
 # Connection states surfaced to the UI (not wire messages — used by client.py)
+# websockets closes a link with 1009 on a frame over 1 MiB. The consolidated
+# ledger passed that on 2026-10-18 and the Mac reconnected forever. Frames are
+# kept well under the default by the sender (LEDGER_PUSH_CHUNK_BYTES) and the
+# client accepts more than the default so an older VPS that still sends the
+# whole ledger in one frame is not refused.
+MAX_FRAME_BYTES = 32 * 1024 * 1024
+LEDGER_PUSH_CHUNK_BYTES = 256 * 1024
+
 CONN_DISCONNECTED = "disconnected"
 CONN_CONNECTING   = "connecting"
 CONN_CONNECTED    = "connected"

@@ -680,10 +680,13 @@ starts and logins, and no errors. The app was killing it, 46 times between
 ## Why the Fill cost card is empty with the VPS trading (2026-10-21)
 
 The card already asks the VPS (`node: "remote"`), and the VPS answers "0
-measured fills in 14 days". The routing is fine. `execution_quality` is only
-written by the Reversal engine's manual Research study
-(`research_lab.measure_costs`), and nobody has run that on the VPS. The Mac's
-793 measured fills all stop on 2026-10-12, the day the VPS took over.
+measured fills in 14 days". The routing is fine. `execution_quality` is
+written by the Reversal research study (`research_lab.measure_costs`), which
+runs from its button and nightly at 22:00 London (`study_schedule.py`). The
+nightly run skips any node where `is_remote_node()` is true, a gate older than
+the engines' move to the trading node, so it measures the Mac's idle ledger
+every night and never runs on the VPS. The Mac's 793 measured fills all stop
+on 2026-10-12, the day the VPS took over.
 
 **Not fixed automatically, on purpose.** A loop that priced new fills on the
 trading node was written and taken back out the same day. Each fill is two

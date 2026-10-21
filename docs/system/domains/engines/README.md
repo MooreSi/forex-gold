@@ -900,9 +900,13 @@ and `/api/brain` ask the right node over the peer-report channel
 * Brain follows the TRADER, like Fill cost: its gates and decisions are the
   trader's.
 * The panel builders stay in `api/routers/engines.py` (the existing route
-  tests patch the controller functions they call), and `api/server.py`
-  registers them as peer reports, so the VPS answers with exactly what its own
-  dashboard would show. A VPS on older code answers "unknown report", which
+  tests patch the controller functions they call), and
+  `offer_panels_to_peer()` registers them as peer reports, so the VPS answers
+  with exactly what its own dashboard would show. **Both composition roots
+  call it**: `api/server.py`, and `app.startup()`. The VPS runs headless
+  (`run.py _run_headless`), which never imports the server; registered only
+  there, the panels were refused as "older code" by a VPS on the same commit
+  as the Mac (same day). A VPS on older code answers "unknown report", which
   the panel turns into "update the VPS". Trend PA falls back to its broadcast
   copy then, because that copy is the VPS's own data.
 * No fallback to this node's numbers: an unreachable VPS is a 503 and the

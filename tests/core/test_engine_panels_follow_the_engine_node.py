@@ -229,3 +229,33 @@ class TestCentralized:
             raise RuntimeError("no db")
         monkeypatch.setattr(pr.db_module, "get_risk_settings", _boom)
         assert pr._centralized() is False
+
+
+class TestAHeadlessVpsCanAnswer:
+    """Owner, 2026-10-21, after updating the VPS: the Reversal panel still
+    said "the VPS is running older code" while Settings > Remote showed both
+    nodes on ed68af27. The VPS runs headless (run.py `_run_headless`), which
+    never imports backend.src.api.server -- the only place the two panels
+    were registered. Brain and Trend PA answered; they are in the table
+    from the start. app.startup() is the composition root both boots share,
+    so it offers them too."""
+
+    def test_the_offer_registers_both_engine_panels(self, monkeypatch):
+        monkeypatch.setattr(pr, "REPORTS", {k: v for k, v in pr.REPORTS.items()
+                                            if not k.endswith("_panel") or k == "trend_pa_panel"})
+        monkeypatch.setattr(pr, "_ARGS", dict(pr._ARGS))
+        from backend.src import app as app_lifecycle
+
+        app_lifecycle._offer_engine_panels_to_peer()
+
+        assert {"breakout_panel", "reversal_panel"} <= set(pr.REPORTS)
+
+    def test_startup_makes_the_offer(self):
+        import ast
+        import inspect
+        from backend.src import app as app_lifecycle
+
+        tree = ast.parse(inspect.getsource(app_lifecycle.startup))
+        called = {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "_offer_engine_panels_to_peer" in called

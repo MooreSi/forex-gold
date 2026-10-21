@@ -440,6 +440,18 @@ async def _install_ea_at_startup() -> None:
         await asyncio.to_thread(ea_deploy.deploy_after_update)
 
 
+def _offer_engine_panels_to_peer() -> None:
+    """Register the Signal Generator panels as peer reports.
+
+    api/server.py does this at import, but a headless VPS (run.py
+    `_run_headless`) never imports it, so the Mac's Breakout and Reversal
+    panels were refused as "older code" by a VPS on the same commit
+    (2026-10-21). Idempotent.
+    """
+    from backend.src.api.routers import engines as _engines_router
+    _engines_router.offer_panels_to_peer()
+
+
 async def startup() -> None:
     global _engine, _tg_reader
     config = cfg_module.load()
@@ -462,6 +474,7 @@ async def startup() -> None:
     import asyncio as _asyncio
     _loop = _asyncio.get_running_loop()
     db_module.set_main_event_loop(_loop)
+    _offer_engine_panels_to_peer()
 
     # Hold a strong reference to every fire-and-forget task until it finishes.
     # asyncio.create_task is called 183 times here with the result discarded --

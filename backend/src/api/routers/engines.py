@@ -159,6 +159,16 @@ async def reversal_report() -> dict:
     return await _from_engine_node("reversal_panel", reversal_report_local)
 
 
+def offer_panels_to_peer() -> None:
+    """Let the paired Mac ask this node for both panels by name.
+
+    Called by both composition roots: api/server.py, and app.startup() for a
+    headless VPS, which never imports the server (2026-10-21).
+    """
+    engines_ctl.register_panel_report("breakout_panel", breakout_report_local)
+    engines_ctl.register_panel_report("reversal_panel", reversal_report_local)
+
+
 async def breakout_report_local() -> dict:
     """Everything the Breakout panel shows, in one read. Places nothing.
 

@@ -122,12 +122,9 @@ ROUTERS = (
 
 # The Signal Generator panels, offered to the paired node by name
 # (services/cluster/peer_reports.py). Their builders are the routes' own, so
-# the VPS answers with exactly what its own dashboard would show. Registered at
-# import, like the routers above, so a VPS answers from the moment it serves.
-from backend.src.controllers import engines_controller as _engines_ctl  # noqa: E402
-
-_engines_ctl.register_panel_report("breakout_panel", engines_router.breakout_report_local)
-_engines_ctl.register_panel_report("reversal_panel", engines_router.reversal_report_local)
+# the VPS answers with exactly what its own dashboard would show. A headless
+# VPS never imports this module; app.startup() makes the same offer for it.
+engines_router.offer_panels_to_peer()
 
 
 def _default_reader_provider() -> Callable[[], Any]:

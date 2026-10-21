@@ -237,6 +237,31 @@ the dashboard needs a phone layout; whether light mode is wanted now that CSS
 tokens make it cheap; and how a release guarantees the committed bundle is not
 stale.
 
+## NEWS on the charts, and two clocks (2026-10-21, docs/todo/025)
+
+The Dashboard chart and the Chart tab's Broker view have a NEWS button
+(`chart/NewsToggle.tsx`, `chart/hooks/useChartNews.ts`,
+`chart/internal/NewsLayer.tsx`, maths in `chart/internal/newsMarks.ts`). It
+reads `GET /api/calendar/chart_news`.
+
+- **Candle stamps are broker time, news is UTC.** The broker's clock is New
+  York + 7 h (UTC+3 in the US summer, +2 in its winter), so each event is
+  converted at its own instant, not with a fixed 3 h: a fixed offset puts
+  every release from November to March an hour late. A fresh tick that
+  disagrees with the rule shifts everything by the difference; a stale one
+  (the weekend) changes nothing.
+- **Low impact exists only from the live feed's week.** `news_history` keeps
+  high and medium; the route merges the feed in for low.
+- `formatBrokerTime` in `shared/format.ts` still assumes a fixed UTC+3; it is
+  an hour out in the broker's winter. Not changed here.
+
+## About > Version history read the wrong shape (2026-10-21)
+
+`/api/system/releases` returned `RELEASES`' tuples, which JSON writes as
+arrays; the page read `r.version` and `r.notes` and drew "—" and nothing for
+every release. A recorder-style test could not see it (below). It is now a
+response model, and `tests/api/routers/test_system.py` reads the real list.
+
 ## A recorder will not catch a shape mismatch (2026-09-18)
 
 Every router test in `tests/api/routers/` replaces its controller with a

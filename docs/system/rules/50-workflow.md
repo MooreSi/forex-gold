@@ -88,6 +88,29 @@ Verified: suite 1989 passed - gates green.
 
 Never mention which AI model produced the change.
 
+## 7. Releasing a version — About > Version history goes with it
+
+Whenever the version changes, **the same commit** carries all four, or none:
+
+1. a new **first** entry in `backend/src/utils/version_history.py` `RELEASES`
+   — `(tag, title, colour, badge, [changes])`, user-facing bullets of more
+   than 40 characters each. This is what Settings, the header, the admin
+   console AND **About > Version history** read;
+2. the matching `## vX.YYY — <title> (date)` section at the top of
+   `CHANGELOG.md` (the GitHub release body, via `tools/publish_release.py`);
+3. the pin test moved: `tests/core/test_version_is_<x>.py` renamed and its
+   strings updated, previous releases still asserted;
+4. a look at the About page: `GET /api/system/releases` must answer with
+   `releases[0].version == version` and named fields
+   (`tests/api/routers/test_system.py` checks both).
+
+The GitHub release is created by `.github/workflows/release.yml` on the push;
+check it landed with `gh release view vX.YYY -R MooreSi/forex-gold`.
+
+Why: until 2026-10-21 the About page showed "—" for every release with no
+notes, because the route sent `RELEASES`' raw tuples and nobody looked at the
+page after a bump. The owner reported it as "isn't updating".
+
 ---
 
 ## Things that look safe and are not

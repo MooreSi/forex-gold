@@ -52,6 +52,13 @@ export const touchedAfterRemove: string[] = [];
 type RangeHandler = (r: { from: number; to: number } | null) => void;
 export const logicalRangeHandlers: RangeHandler[] = [];
 
+/**
+ * Live crosshair listeners, so a test can hover a bar: call each with
+ * `{ time }`. Unsubscribing removes one. Reset it in `beforeEach`.
+ */
+type CrosshairHandler = (p: { time?: number }) => void;
+export const crosshairHandlers: CrosshairHandler[] = [];
+
 /** Every bar any stubbed candle series was handed through `update()`. */
 export const barUpdates: unknown[] = [];
 
@@ -87,12 +94,21 @@ export function chartStub() {
       applyOptions: () => {},
       subscribeClick: alive(() => {}),
       unsubscribeClick: alive(() => {}),
-      subscribeCrosshairMove: alive(() => {}),
-      unsubscribeCrosshairMove: alive(() => {}),
+      subscribeCrosshairMove: (fn: CrosshairHandler) => {
+        if (disposed) throw new Error("Object is disposed");
+        crosshairHandlers.push(fn);
+      },
+      unsubscribeCrosshairMove: (fn: CrosshairHandler) => {
+        if (disposed) throw new Error("Object is disposed");
+        const i = crosshairHandlers.indexOf(fn);
+        if (i >= 0) crosshairHandlers.splice(i, 1);
+      },
       priceScale: () => ({ applyOptions: () => {}, width: () => 60 }),
       timeScale: alive(() => ({
         getVisibleRange: () => ({ from: 0, to: 2_000_000_000 }),
         timeToCoordinate: () => 120,
+        options: () => ({ barSpacing: 10 }),
+        width: () => 800,
         subscribeVisibleTimeRangeChange: alive(() => {}),
         unsubscribeVisibleTimeRangeChange: alive(() => {}),
         subscribeVisibleLogicalRangeChange: (fn: RangeHandler) => {

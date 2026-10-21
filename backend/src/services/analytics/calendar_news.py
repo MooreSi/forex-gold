@@ -53,3 +53,33 @@ def between(start: str, end: str) -> list[dict]:
 async def between_async(start: str, end: str) -> list[dict]:
     from backend.src.db.database import to_db_thread
     return await to_db_thread(between, start, end)
+
+
+# ── The chart's NEWS button ──────────────────────────────────────────────────
+CHART_IMPACTS = frozenset({"high", "medium", "low"})
+_CHART_FIELDS = ("ts", "title", "currency", "impact", "forecast", "previous")
+
+
+def for_chart(from_ts: float, to_ts: float) -> list[dict]:
+    """Events between two UTC instants, for marking on a price chart.
+
+    The kept history is high and medium only, so low impact comes from the
+    live feed, which covers the current week. The feed wins a release both
+    hold: it is the newer read of the same row. Holidays are not releases.
+    """
+    path = _nc.history_file()
+    kept = _history.between(path, from_ts, to_ts) if path is not None else []
+    live = [e for e in _nc.get_events(impacts=set(CHART_IMPACTS)) if from_ts <= e["ts"] <= to_ts]
+    merged: dict[tuple, dict] = {}
+    for e in kept + live:
+        row = {k: e.get(k, "") for k in _CHART_FIELDS}
+        row["ts"] = float(row["ts"])
+        row["impact"] = str(row["impact"]).lower()
+        if row["impact"] in CHART_IMPACTS:
+            merged[(row["ts"], str(row["currency"]), str(row["title"]))] = row
+    return sorted(merged.values(), key=lambda r: (r["ts"], r["currency"], r["title"]))
+
+
+async def for_chart_async(from_ts: float, to_ts: float) -> list[dict]:
+    from backend.src.db.database import to_db_thread
+    return await to_db_thread(for_chart, from_ts, to_ts)

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from backend.src.api.deps import engine as engine_dep
+from backend.src.api.schemas.system import ReleasesOut
 from backend.src.controllers import broker_controller as broker_ctl
 from backend.src.controllers import goal_controller as goal_ctl
 from backend.src.controllers import history_controller as history_ctl
@@ -29,7 +30,7 @@ async def version() -> dict:
     return {"version": system_ctl.app_version()}
 
 
-@router.get("/releases")
+@router.get("/releases", response_model=ReleasesOut)
 async def releases() -> dict:
     """The changelog the About tab lists, newest first.
 

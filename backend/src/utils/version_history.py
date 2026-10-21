@@ -7,6 +7,37 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.615",
+        "Analytics, more AI providers and news on the charts",
+        "blue",
+        "",
+        [
+            "News on the charts: a NEWS button on the Dashboard chart and the "
+            "Chart tab's Broker chart marks every bar a high, medium or low "
+            "impact release fell in, coloured by impact. Hover a marked candle "
+            "for the releases, their forecast and previous, and how far price "
+            "moved in the half hour after. Low impact starts from this week.",
+            "Analytics: each closed trade's worst and best excursion (MAE and "
+            "MFE) and how much of the move it kept; a Monte Carlo risk tab "
+            "that replays your own trades 5,000 times for drawdown odds; and "
+            "gold positioning on the News tab (CFTC managed money and GLD "
+            "holdings).",
+            "AI providers: OpenAI, Gemini, xAI, Mistral and OpenRouter join "
+            "Claude and DeepSeek. Choosing a provider in Settings > AI now "
+            "takes effect; before, the choice was saved under a name nothing "
+            "read.",
+            "VPS: when the VPS is generating signals, the Breakout, Reversal, "
+            "Brain and Trend PA panels on the Mac show the VPS's engines, "
+            "headless VPS included, and the link to the VPS no longer drops "
+            "every 30 seconds once the trade ledger passes 1 MB.",
+            "Bug fixes: About > Version history shows every release again "
+            "(it showed a dash and no notes), Ladder Reach shows the rung each "
+            "trade reached instead of a dash, the compound calculator's goal "
+            "and drawdown go to 100%, and a missing broker clock offset is "
+            "logged once an hour instead of every 30 seconds.",
+        ],
+    ),
+    (
         "v0.614",
         "Bug fixes, calendar improvements and ML improvements",
         "blue",

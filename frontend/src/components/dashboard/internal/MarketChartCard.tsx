@@ -3,6 +3,8 @@ import { CandleChart } from "@/components/chart/CandleChart";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { cn } from "@/lib/cn";
 import type { Timeframe } from "@/components/chart/hooks/useChartController";
+import { useChartNews } from "@/components/chart/hooks/useChartNews";
+import { NewsToggle } from "@/components/chart/NewsToggle";
 import { DashCard } from "./DashCard";
 
 /**
@@ -37,12 +39,15 @@ interface MarketChartCardProps {
 export function MarketChartCard({
   candles, overlays, tick, trades, timeframe, onTimeframe, error,
 }: MarketChartCardProps) {
+  const news = useChartNews(candles[0]?.ts, tick?.timestamp);
   return (
     <DashCard
       title="XAUUSD"
       icon="candlestick"
       className="min-h-[24rem]"
       actions={
+        <div className="flex items-center gap-2">
+        <NewsToggle news={news} compact />
         <div className="flex items-center gap-0.5 rounded bg-surface-2 p-0.5">
           {TIMEFRAMES.map((tf) => (
             <button
@@ -60,6 +65,7 @@ export function MarketChartCard({
             </button>
           ))}
         </div>
+        </div>
       }
       footnote="Open positions are drawn on the chart. The Chart tab has the full toolbar."
     >
@@ -75,7 +81,9 @@ export function MarketChartCard({
               : "The MT5 bridge supplies these. Check the bridge indicator in the header if this stays empty."}
           />
         ) : (
-          <CandleChart candles={candles} overlays={overlays} tick={tick} trades={trades} />
+          <CandleChart
+            candles={candles} overlays={overlays} tick={tick} trades={trades} news={news.layer}
+          />
         )}
         </div>
       </div>

@@ -74,3 +74,33 @@ def test_reads_the_news_for_a_range(make_client, ctl):
     assert r.status_code == 200
     assert r.json()["events"][0]["title"] == "CPI"
     assert ctl == [("news", "2026-09-01", "2026-09-31")]
+
+
+@pytest.fixture
+def chart_news(monkeypatch):
+    calls: list[tuple] = []
+
+    async def _for_chart(from_ts, to_ts):
+        calls.append((from_ts, to_ts))
+        return [{"ts": 5.0, "title": "NFP", "currency": "USD", "impact": "low",
+                 "forecast": "", "previous": ""}]
+
+    monkeypatch.setattr(router_mod.calendar_ctl, "news_for_chart", _for_chart)
+    return calls
+
+
+def test_reads_the_news_for_the_chart_by_instant(make_client, chart_news):
+    r = make_client().get("/api/calendar/chart_news?from_ts=100&to_ts=200")
+    assert r.status_code == 200
+    assert r.json()["events"][0]["impact"] == "low"
+    assert chart_news == [(100.0, 200.0)]
+
+
+@pytest.mark.parametrize("query", [
+    "from_ts=200&to_ts=100",           # backwards
+    "from_ts=0&to_ts=40000000",        # more than 400 days
+    "from_ts=-5&to_ts=100",
+])
+def test_a_bad_chart_window_never_reaches_the_controller(make_client, chart_news, query):
+    assert make_client().get(f"/api/calendar/chart_news?{query}").status_code == 422
+    assert chart_news == []

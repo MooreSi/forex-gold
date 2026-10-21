@@ -220,6 +220,11 @@ Each of these cost real time in a past session:
   [docs/system/rules/80-two-checkouts-one-data-dir.md](docs/system/rules/80-two-checkouts-one-data-dir.md).
   The lock module and its call site are identical in both checkouts; change
   them together.
+- **A version bump updates About > Version history in the same commit.**
+  New `RELEASES[0]` in `version_history.py` (that is what the About page
+  lists), the `CHANGELOG.md` section, the moved pin test, and a look at
+  `/api/system/releases`. The full checklist is
+  [docs/system/rules/50-workflow.md](docs/system/rules/50-workflow.md) §7.
 - **After restoring a mutated source file, delete `__pycache__`.** Python
   invalidates bytecode on mtime + size. A mutation that swaps two things of
   the same length (`(sl, tp, id)` -> `(tp, sl, id)`) restored with `cp` in the

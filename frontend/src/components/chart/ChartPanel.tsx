@@ -14,6 +14,8 @@ import { TradingViewChart } from "./internal/TradingViewChart";
 import { useChartView } from "./hooks/useChartView";
 import { useChartDrawings } from "./hooks/useChartDrawings";
 import { useChartHistory } from "./hooks/useChartHistory";
+import { useChartNews } from "./hooks/useChartNews";
+import { NewsToggle } from "./NewsToggle";
 
 /**
  * Thin wrapper: composition and nothing else. State is in the controller
@@ -35,6 +37,7 @@ export function ChartPanel() {
   const candles = asArray<Candle>(c.candles.data);
   const trades = asArray<Trade>(c.trades.data);
   const history = useChartHistory(c.timeframe, candles);
+  const news = useChartNews((history.older[0] ?? candles[0])?.ts, c.tick.data?.timestamp);
   // A selected position drawing can become an order (2026-09-28). Only on the
   // Broker chart: its prices are the broker's.
   const selectedPosition = tv ? null : drawings.drawings.find(
@@ -60,6 +63,8 @@ export function ChartPanel() {
             view={view}
             onView={setView}
             toolbar={
+              <div className="flex items-center gap-2">
+              <NewsToggle news={news} />
               <ChartToolbar
                 timeframe={c.timeframe}
                 onTimeframe={c.setTimeframe}
@@ -67,6 +72,7 @@ export function ChartPanel() {
                 onCount={c.setCount}
                 onRefresh={() => void c.refreshAll()}
               />
+              </div>
             }
           />
         }
@@ -96,6 +102,7 @@ export function ChartPanel() {
             drawings={drawings}
             history={history.older}
             onLeftEdge={() => void history.loadOlder()}
+            news={news.layer}
           />
         )}
       </PanelShell>

@@ -43,3 +43,16 @@ class NewsEventOut(BaseModel):
 
 class NewsList(BaseModel):
     events: list[NewsEventOut]
+
+
+class ChartNewsEventOut(BaseModel):
+    ts: float
+    title: str
+    currency: str
+    impact: str
+    forecast: str = ""
+    previous: str = ""
+
+
+class ChartNewsList(BaseModel):
+    events: list[ChartNewsEventOut]

@@ -1,8 +1,11 @@
 import { EmptyState } from "@/components/shared/EmptyState";
 
+/** One entry of `/api/system/releases` (backend/src/api/schemas/system.py).
+ *  `version` has no "v": it compares equal to the running version. */
 interface Release {
   version?: string;
-  date?: string;
+  title?: string;
+  badge?: string;
   notes?: string[];
   [key: string]: unknown;
 }
@@ -23,12 +26,17 @@ export function VersionSection({ version, releases }: VersionSectionProps) {
       </p>
       {releases.map((r, i) => (
         <section key={String(r.version ?? i)}>
-          <h3 className="flex items-baseline gap-2">
+          <h3 className="flex flex-wrap items-baseline gap-2">
             <span className="num text-sm font-semibold text-accent">
-              {String(r.version ?? "—")}
+              {r.version ? `v${String(r.version)}` : "—"}
             </span>
-            {r.date && <span className="text-[11px] text-ink-3">{String(r.date)}</span>}
-            {String(r.version) === version && (
+            {r.title && <span className="text-xs font-medium text-ink-1">{String(r.title)}</span>}
+            {r.badge && (
+              <span className="rounded border border-line px-1.5 text-[10px] text-ink-3">
+                {String(r.badge)}
+              </span>
+            )}
+            {version !== null && String(r.version) === version && (
               <span className="rounded border border-profit/40 bg-profit/10 px-1.5 text-[10px] text-profit">
                 running
               </span>

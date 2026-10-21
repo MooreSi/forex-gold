@@ -12,6 +12,8 @@ import { DrawingLayer } from "./internal/DrawingLayer";
 import { DrawingToolbar } from "./internal/DrawingToolbar";
 import type { ChartDrawings } from "./hooks/useChartDrawings";
 import { EDGE_BARS, mergeHistory } from "./internal/history";
+import { NewsLayer } from "./internal/NewsLayer";
+import type { ChartNewsLayer } from "./hooks/useChartNews";
 
 interface CandleChartProps {
   candles: Candle[];
@@ -27,6 +29,8 @@ interface CandleChartProps {
   history?: Candle[];
   /** Called when the view is panned to within a few bars of the oldest. */
   onLeftEdge?: () => void;
+  /** The NEWS button's events; null or absent with the button off. */
+  news?: ChartNewsLayer | null;
 }
 
 // The colours the NiceGUI chart used, kept so the two look like the same app.
@@ -46,7 +50,7 @@ const EMA_COLOURS: Record<string, string> = {
  * every change rather than re-rendering.
  */
 export function CandleChart({
-  candles, overlays, tick, trades, timeframeSeconds, drawings, history, onLeftEdge,
+  candles, overlays, tick, trades, timeframeSeconds, drawings, history, onLeftEdge, news,
 }: CandleChartProps) {
   const holder = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
@@ -304,6 +308,10 @@ export function CandleChart({
         </>
       )}
       <FvgOverlay rects={fvgRects} themeTick={themeTick} />
+      {news && apis && (
+        <NewsLayer chart={apis.chart} isDisposed={isDisposed} bars={bars}
+          tfSeconds={timeframeSeconds} news={news} themeTick={themeTick} />
+      )}
     </div>
   );
 }

@@ -136,3 +136,32 @@ class TestTheDailyGoal:
         body = make_client().get("/api/system/header").json()
 
         assert body["daily_goal"] is None
+
+
+# ── About > Version history ──────────────────────────────────────────────────
+# RELEASES holds tuples, and JSON writes a tuple as a bare array. The About
+# screen reads `version` and `notes`, so for as long as the route passed the
+# tuples through, every release rendered as "—" with no notes and none was
+# ever marked "running" (reported 2026-10-21: "this isn't updating").
+
+def test_the_releases_come_back_as_named_fields(make_client, monkeypatch):
+    monkeypatch.setattr(system_router.system_ctl, "releases", lambda: [
+        ("v9.2", "Newer", "blue", "", ["Did a thing worth a line"]),
+        ("v9.1", "Older", "green", "Beta", ["Another"]),
+    ])
+    monkeypatch.setattr(system_router.system_ctl, "app_version", lambda: "9.2")
+
+    body = make_client().get("/api/system/releases").json()
+
+    assert body["version"] == "9.2"
+    assert body["releases"][0] == {
+        "version": "9.2", "title": "Newer", "badge": "", "notes": ["Did a thing worth a line"]}
+    assert [r["version"] for r in body["releases"]] == ["9.2", "9.1"]
+
+
+def test_the_newest_release_is_the_running_version(make_client):
+    """The real list, so a bump that forgets RELEASES[0] shows here."""
+    body = make_client().get("/api/system/releases").json()
+
+    assert body["releases"][0]["version"] == body["version"]
+    assert all(r["notes"] for r in body["releases"][:5])

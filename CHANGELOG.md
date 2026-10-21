@@ -1,3 +1,41 @@
+## v0.615 — Analytics, more AI providers and news on the charts (2026-10-21)
+
+The About screen carries the user-facing summary; this is the engineering
+record. 9 commits since v0.614, plus this release's own.
+
+**News on the charts** (docs/todo/025)
+- NEWS button on the Dashboard chart and the Chart tab's Broker view:
+  per-bar tint and H/M/L letter by strongest impact, H/M/L and USD/All
+  filters, hover shows the releases and the move to the close 30 min on.
+- `GET /api/calendar/chart_news?from_ts&to_ts`: kept history (high, medium)
+  merged with the live feed's week (adds low; holidays dropped), max 400 d.
+- Broker clock = New York + 7 h, per event; corrected by a fresh tick.
+
+**Analytics** (docs/todo/024)
+- MAE/MFE/capture per closed trade from M1/M5 bars
+  (`trade_excursion_cache`, migration 64).
+- Analysis > Risk: Monte Carlo of the next N trades, 5,000 seeded paths.
+- News tab: CFTC managed money (COT index) and GLD tonnes, cached.
+
+**AI providers**
+- OpenAI, Gemini, xAI, Mistral and OpenRouter on one OpenAI-protocol
+  adapter (`services/ai/provider.py`). The provider dropdown saves
+  `ai_provider` (it saved `provider`, which nothing read).
+
+**VPS**
+- Engine, Brain and Trend PA panels read the VPS over the peer-report
+  channel when it generates; a headless VPS offers them too
+  (`offer_panels_to_peer()` from `app.startup()`).
+- Ledger sent in ~256 KiB frames; the Mac accepts up to 32 MiB (was a 1009
+  close on every connect past 1 MiB).
+
+**Bug fixes**
+- `/api/system/releases` has a response model: the About page got raw
+  tuples and drew "—" with no notes for every release.
+- Ladder Reach reads `avg_rung` and credits a rung from the close price; the
+  compound calculator's ranges widened.
+- The bridge's missing-server-offset refusal is logged once an hour.
+
 ## v0.614 — Bug fixes, calendar improvements and ML improvements (2026-10-20)
 
 The About screen carries the user-facing summary; this is the engineering

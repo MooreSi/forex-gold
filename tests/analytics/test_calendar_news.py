@@ -47,3 +47,49 @@ def test_an_event_just_outside_the_range_is_left_out(monkeypatch):
     _keep([ev(_ts(2026, 8, 31, 23, 59))])
 
     assert cn.between("2026-09-01", "2026-09-30") == []
+
+
+# ── The chart's NEWS button ──────────────────────────────────────────────────
+# The kept history holds high and medium only (news_history.KEEP_IMPACTS), so
+# the chart's low-impact events come from the live feed's current week. Both
+# sources describe the same releases, and one release must not be drawn twice.
+
+def _feed(monkeypatch, rows):
+    monkeypatch.setattr(nc, "_cache_events", rows, raising=False)
+
+
+def _raw(when, title, impact, currency="USD"):
+    return {"date": when.isoformat(), "title": title, "country": currency,
+            "impact": impact, "forecast": "0.3%", "previous": "0.2%"}
+
+
+def test_the_chart_gets_kept_history_and_the_live_weeks_low_impact_events(monkeypatch):
+    _keep([ev(_ts(2026, 9, 15, 12, 30), "Old CPI")])
+    _feed(monkeypatch, [
+        _raw(datetime(2026, 9, 21, 14, 0, tzinfo=timezone.utc), "Pending Home Sales", "Low"),
+        _raw(datetime(2026, 9, 22, 12, 30, tzinfo=timezone.utc), "Core PCE", "High"),
+    ])
+
+    got = cn.for_chart(_ts(2026, 9, 1), _ts(2026, 9, 30))
+
+    assert [(e["title"], e["impact"]) for e in got] == [
+        ("Old CPI", "high"), ("Pending Home Sales", "low"), ("Core PCE", "high")]
+    assert got[1]["forecast"] == "0.3%"
+
+
+def test_a_release_in_both_the_history_and_the_feed_comes_back_once(monkeypatch):
+    when = datetime(2026, 9, 22, 12, 30, tzinfo=timezone.utc)
+    _keep([ev(when.timestamp(), "Core PCE")])
+    _feed(monkeypatch, [_raw(when, "Core PCE", "High")])
+
+    assert [e["title"] for e in cn.for_chart(_ts(2026, 9, 1), _ts(2026, 9, 30))] == ["Core PCE"]
+
+
+def test_holidays_and_events_outside_the_window_are_left_out(monkeypatch):
+    _feed(monkeypatch, [
+        _raw(datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc), "Bank Holiday", "Holiday"),
+        _raw(datetime(2026, 10, 5, 12, 30, tzinfo=timezone.utc), "Too late", "Low"),
+        _raw(datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc), "Kept", "Medium"),
+    ])
+
+    assert [e["title"] for e in cn.for_chart(_ts(2026, 9, 1), _ts(2026, 9, 30))] == ["Kept"]

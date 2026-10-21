@@ -129,4 +129,28 @@ describe("the version history", () => {
     expect(screen.getByText("Ported the News tab")).toBeInTheDocument();
     expect(screen.getByText("running")).toBeInTheDocument();
   });
+
+  it("names each release by its title, as the server sends it", async () => {
+    // The real /api/system/releases shape since 2026-10-21. Before then the
+    // route sent RELEASES' bare tuples and the page showed "—" for every one.
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        version: "0.615",
+        releases: [
+          { version: "0.615", title: "News on the charts", badge: "", notes: ["A NEWS button"] },
+          { version: "0.614", title: "Calendar improvements", badge: "", notes: ["Older"] },
+        ],
+      }),
+    });
+    render(<AboutPanel />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Version history/ }));
+
+    expect(screen.getByText("News on the charts")).toBeInTheDocument();
+    expect(screen.getByText("v0.614")).toBeInTheDocument();
+    expect(screen.getAllByText("running")).toHaveLength(1);
+    expect(screen.getByText("v0.615").closest("section")).toHaveTextContent("running");
+  });
 });

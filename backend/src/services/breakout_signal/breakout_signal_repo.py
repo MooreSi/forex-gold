@@ -499,12 +499,32 @@ def get_ml_features_for_signal(signal_id: int) -> Optional[str]:
 def get_ml_training_data() -> list[dict]:
     rows = get_db().all(
         """SELECT id, ml_features_json, outcome, rr_tp1, sl_dist, lot_size, net_pnl_dollars,
-                  pnl_dollars, live_exec_status, created_at, trigger_time, close_time
+                  pnl_dollars, live_exec_status, created_at, trigger_time, close_time,
+                  direction, breakout_type, entry_mid
            FROM bo_signals
            WHERE status='closed'
              AND outcome IN ('win','loss','be')
              AND ml_features_json IS NOT NULL
            ORDER BY close_time ASC"""
+    )
+    return [_row(r) for r in rows]
+
+
+def export_ml_rows(after_id: int, limit: int) -> list[dict]:
+    """A page of the rows `get_ml_training_data` reads, for the other node
+    (docs/todo/026), by id. Same columns, so the receiver labels them as this
+    node does; direction, type and entry let it spot an event it already holds."""
+    rows = get_db().all(
+        """SELECT id, ml_features_json, outcome, rr_tp1, sl_dist, lot_size, net_pnl_dollars,
+                  pnl_dollars, live_exec_status, created_at, trigger_time, close_time,
+                  direction, breakout_type, entry_mid
+           FROM bo_signals
+           WHERE status='closed'
+             AND outcome IN ('win','loss','be')
+             AND ml_features_json IS NOT NULL
+             AND id > ?
+           ORDER BY id LIMIT ?""",
+        int(after_id), int(limit),
     )
     return [_row(r) for r in rows]
 

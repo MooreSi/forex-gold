@@ -134,6 +134,16 @@ def rows(background: bool) -> list[dict]:
     return [dict(r) for r in out]
 
 
+def export_rows(after_id: int, limit: int) -> list[dict]:
+    """A page of the corpus for the other node (docs/todo/026), by id: every
+    column `rows()` reads, plus the id and stage. Not the message text."""
+    out = re_db.get_db().all(
+        "SELECT id, tg_message_id, stage, direction, indicators_json, fvg_json, "
+        "session, regime_score, outcome, outcome_r, captured_at FROM pro_snapshots "
+        "WHERE id > ? ORDER BY id LIMIT ?", int(after_id), int(limit))
+    return [dict(r) for r in out]
+
+
 def unresolved(min_age_s: float = 300.0) -> list[dict]:
     """Positives with stated levels that still have no outcome. min_age_s
     keeps the resolver off a signal that has only just arrived, where there

@@ -368,6 +368,23 @@ def get_ml_training_data() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def export_ml_rows(after_id: int, limit: int) -> list[dict]:
+    """A page of `get_ml_training_data`'s rows for the other node (docs/todo/026),
+    by id. Labelled outcomes only, and never an executed row: its label needs
+    this node's core trade, which the other node does not have."""
+    rows = get_db().all(
+        "SELECT s.*, c.policy_hash AS tpl_policy_hash, c.available_at AS tpl_available_at, "
+        "c.source AS tpl_label_source FROM re_signals s "
+        "LEFT JOIN re_template_label_contracts c ON c.signal_id=s.id "
+        "WHERE s.status='closed' AND s.ml_features_json IS NOT NULL "
+        "AND s.outcome IN ('win','loss','be') "
+        "AND COALESCE(s.live_exec_status, '') != 'executed' "
+        "AND s.id > ? ORDER BY s.id LIMIT ?",
+        int(after_id), int(limit),
+    )
+    return [dict(r) for r in rows]
+
+
 def store_daily_research(date: str, discipline_score: float, aggression_score: float,
                           summary: str, notable_trades: str, entry_logic_notes: str,
                           risk_mgmt_notes: str, n_messages: int, n_images_analyzed: int,

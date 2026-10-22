@@ -160,16 +160,29 @@ def _dataset_timed() -> tuple[list, list, list, float, list]:
 
     `times` is each row's capture time, in the order of X, for the
     time-blocked folds in `fit`.
+
+    The other node's corpus joins when a merge's benefit check kept it
+    (docs/todo/026). Off, these are the corpus's own rows unchanged.
     """
+    from backend.src.services.ml_merge import union as _merge
+    pos = _merge.with_imported("pro", pro_corpus.rows(background=False), background=False)
+    bg = _merge.with_imported("pro", pro_corpus.rows(background=True), background=True)
+    return dataset_from_rows(pos, bg)[:5]
+
+
+def dataset_from_rows(pos_rows: list, bg_rows: list) -> tuple:
+    """`_dataset_timed` over the given rows, plus the row behind each example.
+    Shared with the merge's benefit check, so it scores what `fit` would fit."""
     X: list = []
     y: list = []
     w: list = []
     rsis: list[float] = []
     times: list = []
-    for background, label in ((False, 1), (True, 0)):
+    used: list = []
+    for rows, label in ((pos_rows, 1), (bg_rows, 0)):
         kept: dict = {}
         order: list = []
-        for n, row in enumerate(pro_corpus.rows(background=background)):
+        for n, row in enumerate(rows):
             v = _row_vector(row)
             if v is None:
                 continue
@@ -186,8 +199,9 @@ def _dataset_timed() -> tuple[list, list, list, float, list]:
                      else _OUTCOME_WEIGHT.get(row.get("outcome") or "", 1.0))
             rsis.append(v[FEATURE_NAMES.index("rsi_norm")] * 100.0)
             times.append(float(row.get("captured_at") or 0.0))
+            used.append(row)
     spread = (max(rsis) - min(rsis)) if rsis else 0.0
-    return X, y, w, spread, times
+    return X, y, w, spread, times, used
 
 
 def _dataset() -> tuple[list, list, list, float]:
@@ -219,6 +233,13 @@ def _blocked_folds(times, n_folds: int) -> list[list[int]]:
 
 
 # ── Fitting ───────────────────────────────────────────────────────────────────
+
+def make_model():
+    """The unfitted classifier `fit` trains. See the comment in `fit`."""
+    from sklearn.ensemble import RandomForestClassifier
+    return RandomForestClassifier(n_estimators=300, min_samples_leaf=5,
+                                  class_weight="balanced", random_state=42)
+
 
 def fit(force: bool = False) -> dict:
     """Refit from the current corpus. Returns the status dict (also cached).
@@ -265,9 +286,7 @@ def fit(force: bool = False) -> dict:
     # instead, and the same moment reads 0.43 against 0.61 for a fresh aligned
     # gap -- the right way round. It also scores better honestly (0.827
     # held-out against 0.763).
-    def _make():
-        return RandomForestClassifier(n_estimators=300, min_samples_leaf=5,
-                                      class_weight="balanced", random_state=42)
+    _make = make_model
 
     # Out-of-fold AUC over TIME-BLOCKED folds, not in-sample and not random:
     # see _blocked_folds. The gate (_MIN_AUC) is unchanged; what changed is the

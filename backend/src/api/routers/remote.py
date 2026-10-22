@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from backend.src.api.deps import engine as engine_dep
 from backend.src.api.errors import Refusal
 from backend.src.controllers import engines_controller as engines_ctl
+from backend.src.controllers import ml_merge_controller as merge_ctl
 from backend.src.controllers import remote_node_controller as node_ctl
 from backend.src.controllers import sync_controller as sync_ctl
 from backend.src.controllers import vps_update_controller as vps_ctl
@@ -301,6 +302,30 @@ async def model_snapshot(body: SnapshotWrite) -> dict:
     except Exception as exc:
         raise Refusal(f"The transfer failed: {exc}") from exc
     return {"direction": body.direction, "note": f"Model snapshot {body.direction} complete."}
+
+
+@router.post("/ml-merge")
+async def ml_merge_start() -> dict:
+    """Merge labelled training rows with the VPS, both ways (docs/todo/026).
+
+    Runs in the background; GET reports it. Each node keeps the other's rows
+    apart from its own and learns from them only if they score at least as
+    well on the newest rows.
+    """
+    if not sync_ctl.is_connected():
+        raise Refusal("Not connected to the VPS. Run the merge from the Mac "
+                      "while it is connected to its VPS.")
+    try:
+        await merge_ctl.start_merge()
+    except merge_ctl.MergeFailed as exc:
+        raise Refusal(str(exc)) from exc
+    return {"note": "Merge started. Both nodes check whether the merged "
+                    "history helps before they learn from it."}
+
+
+@router.get("/ml-merge")
+async def ml_merge_status() -> dict:
+    return await merge_ctl.merge_status()
 
 
 @router.post("/restart-vps")

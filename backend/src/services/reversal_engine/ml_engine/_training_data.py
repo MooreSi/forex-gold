@@ -173,29 +173,41 @@ def _get_training_set():
         # Oldest first: _fit_batch weights row i by its position, and the
         # query has no ORDER BY to promise that.
         rows = sorted(rows, key=lambda r: r.get("id") or 0)
-        risk = executed_risk_for(rows) if executed_on else None
-        X, y, spans = [], [], []
-        for r in rows:
-            f = stored_vector(r)
-            if f is None:
-                continue
-            outcome = r.get("outcome", "")
-            if outcome not in ("win", "loss", "be"):
-                continue
-            label = training_label(r, risk)
-            if label is None:
-                continue
-            X.append(f + _vol.row_tail(r, vol_on))
-            y.append(label)
-            spans.append(_span(r))
-        weights = None
-        if decay_on and X:
-            from backend.src.services.market import sample_weights as _sw
-            weights = _sw.training_weights(spans, DECAY_HALF_LIFE_DAYS, DECAY_FLOOR)
-        return X, y, weights
+        # The other node's rows, when a merge's benefit check kept them
+        # (docs/todo/026). Off, this is `rows` itself.
+        from backend.src.services.ml_merge import union as _merge
+        rows = _merge.with_imported("re", rows)
+        return training_set_from_rows(rows, vol_on, decay_on, executed_on)
     except Exception as exc:
         _log.debug("[RE-ML] training data error: %s", exc)
         return [], [], None
+
+
+def training_set_from_rows(rows: list, vol_on: bool, decay_on: bool,
+                           executed_on: bool):
+    """(X, y, weights) for `rows`, already oldest first. Shared with the merge's
+    benefit check, so it scores exactly what training would fit."""
+    from backend.src.services.reversal_engine import vol_regime as _vol
+    risk = executed_risk_for(rows) if executed_on else None
+    X, y, spans = [], [], []
+    for r in rows:
+        f = stored_vector(r)
+        if f is None:
+            continue
+        outcome = r.get("outcome", "")
+        if outcome not in ("win", "loss", "be"):
+            continue
+        label = training_label(r, risk)
+        if label is None:
+            continue
+        X.append(f + _vol.row_tail(r, vol_on))
+        y.append(label)
+        spans.append(_span(r))
+    weights = None
+    if decay_on and X:
+        from backend.src.services.market import sample_weights as _sw
+        weights = _sw.training_weights(spans, DECAY_HALF_LIFE_DAYS, DECAY_FLOOR)
+    return X, y, weights
 
 
 def stored_vector(row: dict) -> Optional[list]:

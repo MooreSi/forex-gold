@@ -54,6 +54,8 @@ ROUTES = [
     (P.MSG_SIGNAL_ORDER, "_handle_signal_order"),
     (P.MSG_SIGNAL_FOLLOWUP, "_handle_signal_followup"),
     (P.MSG_PEER_REPORT, "_handle_peer_report"),
+    (P.MSG_ML_HISTORY_PUSH, "_handle_ml_history_push"),
+    (P.MSG_ML_MERGE_EVALUATE, "_handle_ml_merge_evaluate"),
 ]
 HANDLERS = [h for _t, h in ROUTES]
 IDS = [t for t, _h in ROUTES]

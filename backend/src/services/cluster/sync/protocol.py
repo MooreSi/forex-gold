@@ -170,6 +170,14 @@ MSG_RESUME_TRADING_ACK = "resume_trading_ack"  # VPS -> Mac: {"req_id","result"}
 MSG_PEER_REPORT     = "peer_report"      # Mac -> VPS: {"req_id","name","args"}
 MSG_PEER_REPORT_ACK = "peer_report_ack"  # VPS -> Mac: {"req_id","result"} or {"req_id","error"}
 
+# Merging ML training rows (docs/todo/026, sync/_ml_merge_sync.py). The Mac
+# pulls the VPS's rows with peer report "ml_history" and pushes its own with
+# MSG_ML_HISTORY_PUSH, in frames under LEDGER_PUSH_CHUNK_BYTES; then it asks
+# the VPS to run its benefit check. An older VPS never answers.
+MSG_ML_HISTORY_PUSH   = "ml_history_push"    # Mac -> VPS: {"req_id","kind","origin_node","rows"}
+MSG_ML_MERGE_EVALUATE = "ml_merge_evaluate"  # Mac -> VPS: {"req_id"}
+MSG_ML_MERGE_ACK      = "ml_merge_ack"       # VPS -> Mac: {"req_id", "inserted"|"result"} or {"req_id","error"}
+
 # Centralized signal generation (Settings > Remote Node > "Generate signals on
 # this node only") — a fully-resolved trade decision from one of the Mac's own
 # generators (Breakout/TestSignal/REopy/GD2-GD-VIP), forwarded to the VPS for

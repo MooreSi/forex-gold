@@ -916,3 +916,48 @@ and `/api/brain` ask the right node over the peer-report channel
 
 Not routed yet: "Retrain in the background" and "Run the research study" still
 act on this machine's engine.
+
+## Merging training data between the nodes (2026-10-22, docs/todo/026)
+
+The engines generate on the node that trades, so each node's history covers
+only the periods it traded: on 2026-10-22 the Mac held 6,445 labelled
+Reversal rows (07-23 to 10-13) and the VPS ~1,444 (since 09-29). Settings >
+Remote > "Merge training data" (Mac only) copies each node's own labelled
+rows to the other, then each node runs a benefit check.
+
+- **Imported rows never touch a live table.** They live in
+  `ml_imported_rows` (Reversal engine database), keyed
+  `(kind, origin_node, origin_id)`. `re_signals`, `bo_signals` and
+  `pro_snapshots` feed every panel, ledger and virtual balance; the other
+  node's history is not this node's record.
+- **Only three readers see them, and only with the kind's switch on**
+  (`ml_merge_state.use_imported`, off by default): the Reversal batch
+  training set (`_training_data._get_training_set`), Breakout
+  `_training_rows`, and `pro_model._dataset_timed`. Not the online learners,
+  the edge model, meta-labelling, the shadow ledger or any panel. Off, each
+  training set is exactly what it was (pinned).
+- **A node exports only its own rows**, never what it imported, so a merge
+  never bounces the other node's history back under a new origin.
+- **Executed Reversal rows are not exported**: their label needs the core
+  trade's recorded risk, which only the node that traded holds. Breakout rows
+  label from their own columns, so all go.
+- **`signal_ref` is not a cross-node key.** It is 6 hex characters; with
+  ~9,000 rows across two nodes a collision is likely. Rows are keyed by
+  origin node and id, and the same event on both nodes (both generated
+  09-29 to 10-13) is found by direction, time (300 s) and price (1.0).
+- **The benefit check is the newest 20% of the union, whoever generated it**,
+  so after a two-way merge both nodes reach the same verdict. Reversal is
+  scored by the gate's effect (R per signal with predicted R < 0 blocked,
+  minus R per signal taking all), Breakout and pro by AUC, each with the
+  engine's own fit and weights. On by "merged scores at least as well as
+  own-only". A few hundred held-out rows are noisy: this stops a merge that
+  measurably hurts, it does not prove one helps.
+- **Positional weights make old imported rows nearly weightless.** With
+  `re_ml_time_decay_enabled` off, `_fit_batch` halves a row's weight every
+  ~41 rows back, so months of the other node's older history barely move the
+  fit; with it on (14-day half-life, floor 0.25) they count at a quarter.
+  The benefit check uses whichever weighting training uses.
+- **The VPS's check runs in a task of its own**: it fits models for up to a
+  minute, and the sync connection's receive loop also carries the Mac's close
+  and resume commands.
+

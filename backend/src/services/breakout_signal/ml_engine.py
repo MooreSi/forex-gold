@@ -420,18 +420,17 @@ def _fit_lgb(X: list, y: list, w: list):
                                          weight=np.array(w, dtype=float)), num_boost_round=100)
 
 
-def _retrain() -> None:
-    global _model, _model_online, _labeled_count, _label_mode, _gate_armed
-    if not _ML_AVAILABLE:
-        return
-    decay_on, _ = _lb.switches()
-    mode = _lb.mode()
-
+def _training_rows() -> list[dict]:
+    """The closed, labelled rows `_retrain` fits, oldest close first. The other
+    node's join when a merge's benefit check kept them (docs/todo/026)."""
     from backend.src.services.breakout_signal import breakout_signal_repo as bdb
-    rows = bdb.get_ml_training_data()
-    if not rows:
-        return
+    from backend.src.services.ml_merge import union as _merge
+    return _merge.with_imported("bo", bdb.get_ml_training_data())
 
+
+def training_arrays(rows: list[dict], decay_on: bool, mode: str) -> tuple[list, list, list]:
+    """(X, y, weights) for `rows`, oldest first. Shared with the merge's benefit
+    check, so it scores exactly what `_retrain` would fit."""
     X_list, y_list, w_list, spans = [], [], [], []
     n = len(rows)
     for i, row in enumerate(rows):
@@ -454,6 +453,21 @@ def _retrain() -> None:
             continue
     if decay_on and X_list:
         w_list = _lb.time_weights(spans)
+    return X_list, y_list, w_list
+
+
+def _retrain() -> None:
+    global _model, _model_online, _labeled_count, _label_mode, _gate_armed
+    if not _ML_AVAILABLE:
+        return
+    decay_on, _ = _lb.switches()
+    mode = _lb.mode()
+
+    rows = _training_rows()
+    if not rows:
+        return
+
+    X_list, y_list, w_list = training_arrays(rows, decay_on, mode)
 
     if len(X_list) < MIN_TRAIN_SAMPLES:
         _log.debug("[BO-ML] Not enough labeled samples yet (%d/%d)", len(X_list), MIN_TRAIN_SAMPLES)

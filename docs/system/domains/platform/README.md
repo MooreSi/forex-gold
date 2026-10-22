@@ -42,6 +42,8 @@ allowed to call.
 - Controller shape rules: flat file, ≤200 lines, one service per operation, no `backend.src.db` import, no repo import, no loops/merges/formatting/fallbacks, no NiceGUI import. Enforced at zero.
 - The admin server is started by the composition root in `backend/src/app.py`, never by a page; `remote_controller.py` exposes only the customer-install side.
 - Model training is deliberately **not** synced continuously; transfer is a one-shot, user-triggered copy.
+  Since 2026-10-22 there is also a one-shot **training-data merge** (Settings > Remote > Merge training data,
+  docs/todo/026): rows, not model files, into `ml_imported_rows`; see the engines domain file.
 
 ## Known things & gotchas
 

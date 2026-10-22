@@ -60,6 +60,12 @@ async def _trend_pa_report() -> dict:
     return await db_module.to_db_thread(panel_data.local_report)
 
 
+async def _ml_history_report(kind: str, after: int = 0, limit: int = 500) -> dict:
+    """A page of this node's own labelled training rows (docs/todo/026)."""
+    from backend.src.services.ml_merge import service as ml_merge
+    return await ml_merge.history_report(kind, after, limit)
+
+
 # The only reports a peer may ask for. The name arrives off the wire.
 # `register` adds the Signal Generator panels: their builders live in the API
 # layer (backend/src/api/routers/engines.py), which a service may not import,
@@ -70,6 +76,7 @@ REPORTS = {
     "signals": _signals_report,
     "brain": _brain_report,
     "trend_pa_panel": _trend_pa_report,
+    "ml_history": _ml_history_report,
 }
 # Per report, the arguments it takes and how each is checked.
 _ARGS = {
@@ -81,6 +88,11 @@ _ARGS = {
     },
     "brain": {"limit": _int_in(1, 500)},
     "trend_pa_panel": {},
+    "ml_history": {
+        "kind": lambda v: v in ("re", "bo", "pro"),
+        "after": _int_in(0, 2**62),
+        "limit": _int_in(1, 2000),
+    },
 }
 
 

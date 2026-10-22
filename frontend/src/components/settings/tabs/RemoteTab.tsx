@@ -8,6 +8,7 @@ import { asObject } from "@/lib/asArray";
 import { RemotePeerHealthSection } from "../internal/RemotePeerHealthSection";
 import { RemoteChannelSetupLine } from "../internal/RemoteChannelSetupLine";
 import { RemoteRestartSection } from "../internal/RemoteRestartSection";
+import { RemoteMlMergeSection } from "../internal/RemoteMlMergeSection";
 import { RemoteUpgradeSection } from "../internal/RemoteUpgradeSection";
 import { RemoteServerSection, type ServerState } from "../internal/RemoteServerSection";
 import { useSettingsResource } from "../hooks/useSettingsResource";
@@ -289,6 +290,7 @@ export function RemoteTab() {
             </Button>
           ))}
         </div>
+        <RemoteMlMergeSection connected={connected} />
       </section>
     </div>
   );

@@ -212,7 +212,7 @@ export const RISK_GROUPS: RiskGroup[] = [
       {
         key: "never_add_to_loser_enabled",
         label: "Never add to a loser", kind: "toggle",
-        hint: "Refuses a new order while an open trade in the same direction, from any channel or engine, is losing at the current price. Orders added that way since July lost three times as much per trade. Try it on demo first.",
+        hint: "Refuses a new order while an open trade in the same direction, from any channel or engine, is losing at the current price or still waiting for the broker to confirm it. Orders added that way since July lost three times as much per trade. Try it on demo first.",
       },
       {
         key: "internal_hedge_mode", label: "Hedging", kind: "choice",

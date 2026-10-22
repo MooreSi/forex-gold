@@ -66,12 +66,13 @@ log = logging.getLogger(__name__)
 _OPEN_SLOTS_SQL = """
         (SELECT COUNT(*) FROM vantage_simulated_trades WHERE status='open')
 """
-_IN_FLIGHT_SLOTS_SQL = """
-        (SELECT COUNT(*) FROM vantage_signals s WHERE s.status='activating'
+_IN_FLIGHT_WHERE = """s.status='activating'
              AND s.signal_id IS NOT ?
              AND NOT EXISTS (SELECT 1 FROM vantage_pending_orders p
                               WHERE p.signal_id = s.signal_id
-                                AND p.status IN ('working','withdrawn')))
+                                AND p.status IN ('working','withdrawn'))"""
+_IN_FLIGHT_SLOTS_SQL = f"""
+        (SELECT COUNT(*) FROM vantage_signals s WHERE {_IN_FLIGHT_WHERE})
 """
 _SLOTS_IN_USE_SQL = f"{_OPEN_SLOTS_SQL} + {_IN_FLIGHT_SLOTS_SQL}"
 
@@ -119,6 +120,24 @@ def _max_open_trades(conn) -> int:
         return int(row[0]) if row and row[0] is not None else 1
     except (TypeError, ValueError):
         return 1
+
+
+def count_unrecorded_opens_in_flight(direction: str, exclude_signal_id=None) -> int:
+    """Market opens in flight in one direction that have no open row yet.
+
+    The same in-flight rule as max open trades, for never-add-to-a-loser
+    (risk/position_guards, docs/todo/026): an order claimed and sent but not
+    yet confirmed has an outcome nobody knows. Once its row exists, the guard
+    judges it on its price instead, so a recorded one is not counted here.
+    """
+    with db() as conn:
+        return int(conn.execute(
+            f"SELECT COUNT(*) FROM vantage_signals s WHERE {_IN_FLIGHT_WHERE} "
+            "AND UPPER(s.direction) = ? AND NOT EXISTS (SELECT 1 FROM "
+            "vantage_simulated_trades t WHERE t.signal_id = s.signal_id "
+            "AND t.status = 'open')",
+            (*_exclusion(exclude_signal_id), direction.upper()),
+        ).fetchone()[0])
 
 
 def count_trade_slots_used(conn=None, exclude_signal_id=None) -> int:

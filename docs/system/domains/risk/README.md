@@ -580,6 +580,16 @@ moves anything.
   price a trade opens at keeps the spread out, so a trade that opened a moment
   ago is not a loser. A grid placeholder's `entry_price` is 0 until its fill is
   matched and is skipped, as are rows of the signal being opened.
+- **An order in flight counts as unknown, and unknown refuses (same day,
+  10:55 UTC).** With the switch on, two Reversal Engine BUYs from two signals
+  were sent 1.4s apart. The app records a trade only once the broker confirms
+  it, so the first had no row and the guard saw nothing open. The guard now
+  also refuses while a same-direction signal is `activating` with no resting
+  order and no open row: max open trades' own in-flight rule
+  (`signal_state_repo._IN_FLIGHT_WHERE`, now one shared definition), filtered
+  by direction. In practice this means one new entry per direction at a time.
+  **The Market Order dialog claims no signal**, so its orders are invisible
+  while in flight. A stranded claim is released by the existing sweep.
 - **The daily loss limit is `check_daily_loss_limit`, not `rg_check_halt`.**
   Two functions compute "the daily loss limit". `rg_check_halt` runs only with
   the Risk Governor on and counts the broker day; `check_daily_loss_limit`

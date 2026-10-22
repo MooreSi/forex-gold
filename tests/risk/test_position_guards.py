@@ -351,3 +351,68 @@ class TestTheTwentySecondOfOctober:
         self._morning()
         with pytest.raises(ValueError, match="daily loss limit"):
             _check(_Bridge(_tick(4120.78, 4120.99), balance=BALANCE - 20.0))
+
+
+# ── an order in flight is not known to be safe (2026-10-22, 10:55) ───────────
+
+def _in_flight(signal_id, direction="BUY", resting=False):
+    """A signal claimed for opening (`activating`) whose order has not been
+    recorded yet -- what open_trade_from_signal leaves while the EA acks."""
+    with db.db() as conn:
+        conn.execute(
+            "INSERT INTO vantage_signals (signal_id,source_name,direction,entry_low,"
+            "entry_high,stop_loss,lot_size,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (signal_id, "Reversal Engine", direction, 4081.0, 4082.0, 4076.64, 0.03,
+             "activating", time.time()))
+        if resting:
+            conn.execute(
+                "INSERT INTO vantage_pending_orders (trade_id,signal_id,channel_name,"
+                "direction,price,stop_loss,tps_json,pcts_json,be_at_pos,tp_open,lot_size,"
+                "ea_ticket,status,created_at,strategy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f"po-{signal_id}", signal_id, "Reversal Engine", direction, 4081.0,
+                 4076.64, "{}", "[]", 0, 0, 0.03, 555, "working", time.time(), "limit_runner"))
+
+
+class TestAnOrderInFlight:
+    """Owner, 2026-10-22: two Reversal Engine BUYs were sent 1.4s apart at
+    10:55 with the switch on. The first had not been confirmed, so it had no
+    row, and the guard saw nothing open. An order in flight has an unknown
+    outcome, and unknown is not safe."""
+
+    @pytest.fixture(autouse=True)
+    def _on(self, fresh_db):
+        _settings(never_add_to_loser_enabled=1)
+
+    def test_a_same_direction_order_in_flight_refuses_the_next(self):
+        _in_flight("ra25e34")
+        with pytest.raises(ValueError, match="in flight"):
+            _check(_Bridge(_tick(4081.29, 4081.50)), signal_id="r7761a4")
+
+    def test_an_order_in_flight_the_other_way_does_not_refuse(self):
+        _in_flight("ra25e34", direction="SELL")
+        _check(_Bridge(_tick(4081.29, 4081.50)), signal_id="r7761a4")
+
+    def test_its_own_claim_does_not_refuse_the_order_being_opened(self):
+        _in_flight("r7761a4")
+        _check(_Bridge(_tick(4081.29, 4081.50)), signal_id="r7761a4")
+
+    def test_a_resting_limit_order_is_not_an_order_in_flight(self):
+        """Its signal stays `activating` until the fill; that is a resting
+        order, as max open trades already treats it."""
+        _in_flight("ra25e34", resting=True)
+        _check(_Bridge(_tick(4081.29, 4081.50)), signal_id="r7761a4")
+
+    def test_once_recorded_it_is_judged_on_its_price_instead(self):
+        """The row exists and is in profit; the claim not yet flipped to
+        active must not refuse on its own."""
+        _in_flight("ra25e34")
+        _row("t1", "BUY", 4080.00, 4075.00, signal_id="ra25e34x")
+        with db.db() as conn:
+            conn.execute("UPDATE vantage_simulated_trades SET signal_id='ra25e34' "
+                         "WHERE trade_id='t1'")
+        _check(_Bridge(_tick(4081.29, 4081.50)), signal_id="r7761a4")
+
+    def test_switched_off_an_order_in_flight_refuses_nothing(self):
+        _settings(never_add_to_loser_enabled=0)
+        _in_flight("ra25e34")
+        _check(_Bridge(_tick(4081.29, 4081.50)), signal_id="r7761a4")

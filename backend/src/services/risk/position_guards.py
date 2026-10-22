@@ -5,7 +5,8 @@ and 01:00 UTC:
 
 * **Never add to a loser** (`never_add_to_loser_enabled`). Refuse an order
   while an open trade in the same direction, from any source, is losing at
-  the current price. Over 808 real Reversal Engine orders (2026-07-07 to
+  the current price, or while a same-direction order is still in flight
+  (claimed, sent, not yet confirmed). Over 808 real Reversal Engine orders (2026-07-07 to
   10-22), the 72 added to a same-direction trade already underwater averaged
   -$12.98, against -$3.76 for an order opened with nothing open that way.
 * **Count open risk toward the daily limit** (`daily_limit_counts_open_risk`).
@@ -43,7 +44,8 @@ async def check(bridge: Any, *, signal_id: str, direction: str, stop_loss: float
     positions = [p for p in risk_repo.open_positions_for_guards()
                  if p["signal_id"] != signal_id]
     if add_on:
-        _refuse(losing_same_direction(direction, tick, positions))
+        _refuse(losing_same_direction(direction, tick, positions)
+                or _in_flight_same_direction(direction, signal_id))
     if risk_on:
         _refuse(await _open_risk_reason(bridge, direction, stop_loss, lot_size,
                                         strategy, tick, rs, positions))
@@ -74,6 +76,18 @@ def losing_same_direction(direction: str, tick: Any, positions: list[dict]) -> O
             return (f"Never add to a loser: an open {direction.upper()} from "
                     f"{entry:.2f} is losing (price now {now:.2f}). Order refused.")
     return None
+
+
+def _in_flight_same_direction(direction: str, signal_id: str) -> Optional[str]:
+    """Why a same-direction order still awaiting its confirmation forbids
+    this one, or None. Its fill is unknown, and unknown is not safe: at 10:55
+    on 2026-10-22 two BUYs were sent 1.4s apart and the first had no row yet."""
+    from backend.src.services.trading import signal_state_repo
+    n = signal_state_repo.count_unrecorded_opens_in_flight(direction, signal_id)
+    if not n:
+        return None
+    return (f"Never add to a loser: {n} {direction.upper()} order(s) still in flight, "
+            "outcome not yet known. Order refused.")
 
 
 def position_risk(p: dict) -> float:

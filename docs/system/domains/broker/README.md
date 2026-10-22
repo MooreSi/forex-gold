@@ -19,6 +19,7 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 ## Where the code lives
 
 - `mt5_bridge.py` (repo root) — the Wine-Python subprocess serving `/health`, `/tick/XAUUSD`, `/candles`, `/account`, `/positions`, `/history`, `POST /reconnect` on port 9000 (stdlib + `MetaTrader5` only)
+- `mt5_symbols.py` (repo root, stdlib only) — the broker's own name for a symbol the app asks for (`SP500` -> `US500`, `XAGUSD` -> `XAGUSD.a`); used by the bridge's two candle reads, never for the trading symbol
 - `services/broker/mt5_client.py` — async HTTP client for the bridge; all methods return None/empty on failure rather than raising
 - `services/broker/mt5_native.py` — `NativeMT5Bridge`: imports `mt5_bridge.py` as a module on native Windows, same public interface, no HTTP
 - `services/broker/bridge_process.py` — launching/recovering the bridge subprocess; `bridge_script_path()` pins the repo-root lookup
@@ -60,6 +61,19 @@ per-tick trail/partial ladder inside MT5's `OnTick`). Everything is
 - One-time MT5 terminal setup: Tools > Options > Expert Advisors must allow socket for 127.0.0.1, or `SocketConnect` always fails.
 
 ## Known things & gotchas
+
+- **Symbol names are the broker's, not ours (2026-10-22).** Brokers add an
+  account-type affix (`XAGUSD.a`, `XAGUSDm`, `#XAGUSD`, `US500.cash`) or use
+  another name (`US500`, `DXY`, `USOIL`, `SILVER`, `GOLD`). The cross-asset
+  peers were hardcoded to the owner's broker, so a customer's broker
+  (EV-156MMIO7U6F, v0.613) served none and the sweep logged a retry every
+  minute. The bridge's candle reads now look the name up once per broker
+  server (`mt5_symbols.resolve`) and add a hidden symbol to Market Watch
+  before reading it. An exact name is always used as-is. The **trading
+  symbol is deliberately excluded**: a broker's gold variants differ in
+  contract size, lots and stops, which is the order path -- docs/todo/broker/010
+  phase 2, needs a demo session. A pair-shaped name is also checked against
+  the broker's stated profit currency: `Silver_EU` passes on name alone.
 
 - **Every MT5 time-range read speaks server time, ticks included (2026-09-30).** `copy_ticks_range` reads the datetimes it is given as the terminal's server time and stamps its ticks the same way, exactly like `copy_rates_range`; the tz-aware UTC datetimes the 2026-09-03 probe trusted do not change that. On the VPS (UTC+3) every tick read before this date came from three hours before the window asked for. The probe compared stamps with the request, which agree in either convention -- **check a time-range read by PRICE against the live quote, never by its own stamps.** `mt5_ticks.py` now shifts both ways by a measured offset (live quote stamp minus the clock, trusted only near a whole half hour). Consumers of the old reads: excursion backfill, `research_lab`, `ai_tuner` spread evidence, `entry_spread`, the backtest tick path. None is on the order path. Bars still come through `_get_candles_range`'s own correction, which trusts any quote age and is wrong while the market is shut. docs/todo/reversal-engine/250.
 - **Bumping `EA_VERSION` is a live change to a running account, not a source

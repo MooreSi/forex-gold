@@ -29,6 +29,12 @@ log = logging.getLogger("reversal_engine")
 # process rather than re-requested every minute.
 _skip_days: set[str] = set()
 
+# Passes in a row with gold and no peer at all before a day is left for this
+# run. One miss is the bridge and is retried; a broker that names every peer
+# differently misses forever, and was asked every minute (docs/todo/broker/010).
+PEER_MISSES_BEFORE_SKIP = 5
+_peer_misses: dict[str, int] = {}
+
 # Enough history before the earliest signal of the day for the six-hour
 # window plus the staleness allowance.
 _LEAD_S = (xa.WINDOW + 2) * xa.BAR_S + xa.MAX_AGE_S
@@ -79,8 +85,16 @@ async def xasset_sweep(engine: Any, bridge: Any = _UNSET,
         peers[p] = await bridge.get_candles_range_for_symbol(p, lo, hi, "M5")
     if not any(peers.values()):
         # Gold came back and nothing else did: the bridge, not the market.
-        log.info("[RE-XAsset] no peer served for %s; will retry", day)
+        misses = _peer_misses[day] = _peer_misses.get(day, 0) + 1
+        if misses >= PEER_MISSES_BEFORE_SKIP:
+            _skip_days.add(day)
+            del _peer_misses[day]
+            log.info("[RE-XAsset] no peer served for %s %d times; skipped for this run",
+                     day, misses)
+        else:
+            log.info("[RE-XAsset] no peer served for %s; will retry", day)
         return
+    _peer_misses.pop(day, None)
 
     pairs = []
     for r in rows:

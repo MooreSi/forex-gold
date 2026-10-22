@@ -192,3 +192,34 @@ class TestItIsOnTheTimer:
 
         asyncio.run(_go())
         assert called == [engine]
+
+
+class TestABrokerWithNoPeers:
+    """docs/todo/broker/010: a broker that serves gold and none of the peers
+    was asked again every minute, 1,440 log lines a day (EV-156MMIO7U6F,
+    2026-10-22). A miss is still retried, in case it was the bridge, but
+    after `PEER_MISSES_BEFORE_SKIP` in a row the day is left for this run."""
+
+    def test_the_day_is_left_after_repeated_misses(self, fresh):
+        _signal("a", _T_TODAY)
+        for _ in range(sweep.PEER_MISSES_BEFORE_SKIP):
+            _run(_Bridge(fail_all_peers=True))
+        b = _Bridge()
+        _run(b)
+        assert b.calls == []
+
+    def test_one_miss_short_of_the_limit_is_still_retried(self, fresh):
+        sid = _signal("a", _T_TODAY)
+        for _ in range(sweep.PEER_MISSES_BEFORE_SKIP - 1):
+            _run(_Bridge(fail_all_peers=True))
+        _run(_Bridge())
+        assert repo.get_signal_by_id(sid)["xasset_json"] is not None
+
+    def test_giving_up_is_logged_once_not_every_pass(self, fresh, caplog):
+        _signal("a", _T_TODAY)
+        with caplog.at_level("INFO", logger="reversal_engine"):
+            for _ in range(sweep.PEER_MISSES_BEFORE_SKIP + 3):
+                _run(_Bridge(fail_all_peers=True))
+        lines = [r.getMessage() for r in caplog.records if "[RE-XAsset]" in r.getMessage()]
+        assert len(lines) <= sweep.PEER_MISSES_BEFORE_SKIP
+        assert sum("skipped for this run" in ln for ln in lines) == 1

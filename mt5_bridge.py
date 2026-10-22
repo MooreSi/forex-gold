@@ -44,6 +44,7 @@ import mt5_terminal  # noqa: E402
 import mt5_orders  # noqa: E402
 import mt5_fill  # noqa: E402
 import mt5_ticks  # noqa: E402
+import mt5_symbols  # noqa: E402
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -498,7 +499,10 @@ def _get_candles_range(from_ts: float, to_ts: float,
     try:
         tf_seconds = _TF_SECONDS.get(timeframe, 60)
         now = time.time()
+        symbol = mt5_symbols.for_read(mt5, symbol, SYMBOL)  # broker/010
         tick = mt5.symbol_info_tick(symbol)
+        if tick is None and mt5_symbols.show(mt5, symbol):
+            tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             return None
         offset = tick.time - now  # add to true UTC to get MT5's raw .time convention
@@ -550,7 +554,10 @@ def _get_candles_for_symbol(symbol: str, timeframe: str, count: int) -> list[dic
     if tf is None:
         return None
     try:
+        symbol = mt5_symbols.for_read(mt5, symbol, SYMBOL)  # broker/010
         rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+        if (rates is None or len(rates) == 0) and mt5_symbols.show(mt5, symbol):
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
         if rates is None or len(rates) == 0:
             return None
         result = []

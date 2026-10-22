@@ -24,6 +24,15 @@ def signals_missing_xasset() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def measured_signals() -> list[dict]:
+    """Every measured signal with what was stored, for the re-measure pass."""
+    rows = get_db().all(
+        "SELECT id, created_at, direction, xasset_json FROM re_signals "
+        "WHERE xasset_json IS NOT NULL AND created_at IS NOT NULL"
+    )
+    return [dict(r) for r in rows]
+
+
 def store_xasset(pairs: Iterable[tuple[int, str]]) -> None:
     for sid, payload in pairs:
         get_db().run("UPDATE re_signals SET xasset_json=? WHERE id=?", payload, sid)

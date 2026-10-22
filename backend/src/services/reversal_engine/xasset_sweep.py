@@ -35,6 +35,11 @@ _skip_days: set[str] = set()
 PEER_MISSES_BEFORE_SKIP = 5
 _peer_misses: dict[str, int] = {}
 
+# Days measured again this run. A day whose peers were stored missing is read
+# once more per run, not every minute: some peers are genuinely shut on some
+# days, and those gain nothing from asking again.
+_remeasured_days: set[str] = set()
+
 # Enough history before the earliest signal of the day for the six-hour
 # window plus the staleness allowance.
 _LEAD_S = (xa.WINDOW + 2) * xa.BAR_S + xa.MAX_AGE_S
@@ -53,7 +58,8 @@ def _engine_bridge() -> Optional[Any]:
 
 async def xasset_sweep(engine: Any, bridge: Any = _UNSET,
                        bridge_getter: Optional[Callable[[], Any]] = None) -> None:
-    """One pass: measure the newest unmeasured day, if any."""
+    """One pass: measure the newest unmeasured day, if any; else measure
+    again the newest day whose peers were stored missing."""
     if bridge is _UNSET:
         bridge = (bridge_getter or _engine_bridge)()
     if bridge is None:
@@ -66,10 +72,28 @@ async def xasset_sweep(engine: Any, bridge: Any = _UNSET,
         if day not in _skip_days:
             by_day.setdefault(day, []).append(r)
     if not by_day:
+        await _remeasure(bridge)
         return
 
     day = max(by_day)
     rows = by_day[day]
+    candles = await _read_day(bridge, day, rows)
+    if candles is None:
+        return
+    gold, peers = candles
+
+    pairs = []
+    for r in rows:
+        snap = xa.snapshot(gold, peers, float(r["created_at"]), r.get("direction") or "")
+        pairs.append((int(r["id"]), json.dumps(snap)))
+    xasset_repo.store_xasset(pairs)
+    log.info("[RE-XAsset] measured %d signals on %s (%d days still to do)",
+             len(pairs), day, len(by_day) - 1)
+
+
+async def _read_day(bridge: Any, day: str, rows: list[dict]) -> Optional[tuple]:
+    """(gold, {peer: bars}) covering the day's signals, or None when the day
+    cannot be measured this pass."""
     t_min = min(float(r["created_at"]) for r in rows)
     t_max = max(float(r["created_at"]) for r in rows)
     lo, hi = t_min - _LEAD_S, t_max
@@ -78,7 +102,7 @@ async def xasset_sweep(engine: Any, bridge: Any = _UNSET,
     if not gold:
         _skip_days.add(day)
         log.info("[RE-XAsset] no gold history for %s; skipped for this run", day)
-        return
+        return None
 
     peers = {}
     for p in xa.PEERS:
@@ -93,13 +117,40 @@ async def xasset_sweep(engine: Any, bridge: Any = _UNSET,
                      day, misses)
         else:
             log.info("[RE-XAsset] no peer served for %s; will retry", day)
-        return
+        return None
     _peer_misses.pop(day, None)
+    return gold, peers
+
+
+async def _remeasure(bridge: Any) -> None:
+    """Measure again the newest day on which some peer is missing from every
+    signal: a feed that did not serve it, not a market shut for part of the
+    day. Until 2026-10-22 the bridge read six of the seven peers from MT5's
+    stale cache, and those signals were stored once with the peers missing.
+    A row is replaced only by a reading that measured more peers."""
+    by_day: dict[str, list[dict]] = {}
+    for r in xasset_repo.measured_signals():
+        day = _day(r["created_at"])
+        if day not in _skip_days and day not in _remeasured_days:
+            by_day.setdefault(day, []).append(r)
+    days = [d for d in sorted(by_day, reverse=True)
+            if set.intersection(*(xa.missing_peers(r["xasset_json"]) for r in by_day[d]))]
+    if not days:
+        return
+
+    day = days[0]
+    rows = by_day[day]
+    candles = await _read_day(bridge, day, rows)
+    if candles is None:
+        return
+    _remeasured_days.add(day)
+    gold, peers = candles
 
     pairs = []
     for r in rows:
         snap = xa.snapshot(gold, peers, float(r["created_at"]), r.get("direction") or "")
-        pairs.append((int(r["id"]), json.dumps(snap)))
+        if len(xa.missing_peers(snap)) < len(xa.missing_peers(r["xasset_json"])):
+            pairs.append((int(r["id"]), json.dumps(snap)))
     xasset_repo.store_xasset(pairs)
-    log.info("[RE-XAsset] measured %d signals on %s (%d days still to do)",
-             len(pairs), day, len(by_day) - 1)
+    log.info("[RE-XAsset] measured %d of %d signals on %s again (%d days still to do)",
+             len(pairs), len(rows), day, len(days) - 1)

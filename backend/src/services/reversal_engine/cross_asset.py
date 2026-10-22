@@ -129,6 +129,16 @@ def snapshot(gold: Sequence[dict], peers: dict, t: float, direction: str) -> dic
     return {"v": SCHEMA_VERSION, "t": t, "features": feats}
 
 
+def missing_peers(stored) -> set[str]:
+    """Peers with not one of their four values measured in a stored record.
+    Every peer for a record that cannot be read."""
+    try:
+        feats = (json.loads(stored) if isinstance(stored, str) else stored)["features"]
+        return {p for p in PEERS if all(feats.get(f"{p}_{k}") is None for k in _PER_PEER)}
+    except (TypeError, ValueError, KeyError):
+        return set(PEERS)
+
+
 def vector(stored) -> Optional[list[float]]:
     """The model's view of a stored record: neutrals for missing values,
     extremes clamped. None for a row that was never measured."""

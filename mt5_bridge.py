@@ -500,12 +500,18 @@ def _get_candles_range(from_ts: float, to_ts: float,
         tf_seconds = _TF_SECONDS.get(timeframe, 60)
         now = time.time()
         symbol = mt5_symbols.for_read(mt5, symbol, SYMBOL)  # broker/010
+        if symbol != SYMBOL:
+            # Outside Market Watch a peer is read from the terminal's cache, hours
+            # to weeks stale, with no error (reversal-engine/230, 2026-10-22).
+            mt5_symbols.show(mt5, symbol)
         tick = mt5.symbol_info_tick(symbol)
         if tick is None and mt5_symbols.show(mt5, symbol):
             tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             return None
-        offset = tick.time - now  # add to true UTC to get MT5's raw .time convention
+        # A peer's offset comes from gold's quote: a shut market's is hours old.
+        clock = (mt5.symbol_info_tick(SYMBOL) if symbol != SYMBOL else None) or tick
+        offset = clock.time - now  # add to true UTC to get MT5's raw .time convention
 
         bars_needed = max(int((now - from_ts) / tf_seconds) + 5, 5)
         rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars_needed)

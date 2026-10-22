@@ -15,6 +15,7 @@ from unittest import mock
 import pytest
 
 from backend.src.db import database as db
+from backend.src.services.cluster import node_roles
 from backend.src.services.reversal_engine import study_schedule
 
 
@@ -31,7 +32,7 @@ class _Bridge:
     broker round trips."""
 
 
-def _sweep(now, *, bridge=_Bridge(), remote=False, runner=None, engine=None):
+def _sweep(now, *, bridge=_Bridge(), remote=False, trader=True, runner=None, engine=None):
     calls = []
 
     async def _default(bridge_arg, **kwargs):
@@ -40,6 +41,7 @@ def _sweep(now, *, bridge=_Bridge(), remote=False, runner=None, engine=None):
 
     async def _go():
         with mock.patch.object(db, "is_remote_node", return_value=remote), \
+             mock.patch.object(node_roles, "is_active_trader_node", return_value=trader), \
              mock.patch(_RUN_STUDY, side_effect=runner or _default), \
              mock.patch.object(study_schedule, "_bridge_of_running_engine",
                                return_value=bridge):
@@ -74,12 +76,23 @@ class TestWhenItRuns:
         assert len(_sweep(_at(22, 0, day=21))) == 1
         assert db.get_app_config("re_study_last") == "2026-07-21"
 
-    def test_a_remote_node_never_runs_it(self, fresh_db):
-        """Same gate the nightly sweep uses. The study reads through the
-        bridge the LOCAL engine trades on and writes measurement columns to
-        the local database; a second node doing it duplicates the broker load
-        and measures a book it is not keeping."""
-        assert _sweep(_at(22, 0), remote=True) == []
+    # Owner, 2026-10-22: "run the nightly study on the vps unless the active
+    # node is the local node". It used to be gated on is_remote_node(), from
+    # before the engines moved to the trading node (2026-09-29), so it ran on
+    # the Mac every night against a ledger with no new trades and never on the
+    # VPS -- and the Dashboard's Fill cost card, which reads the VPS, was empty.
+    # The study measures the book the node keeps, which is the active trader's.
+
+    def test_the_vps_runs_it_when_it_is_the_active_trader(self, fresh_db):
+        assert len(_sweep(_at(22, 0), remote=True, trader=True)) == 1
+        assert db.get_app_config("re_study_last") == "2026-07-20"
+
+    def test_a_node_that_is_not_the_active_trader_never_runs_it(self, fresh_db):
+        """The Mac while the VPS trades, or the VPS while the Mac does. A
+        second node duplicating the broker load to measure a book it is not
+        keeping is what the old gate was for, and still holds."""
+        assert _sweep(_at(22, 0), remote=False, trader=False) == []
+        assert _sweep(_at(22, 0), remote=True, trader=False) == []
         assert db.get_app_config("re_study_last") is None
 
 

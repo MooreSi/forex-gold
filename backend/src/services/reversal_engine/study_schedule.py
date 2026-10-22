@@ -95,11 +95,14 @@ async def reversal_engine_study_sweep(engine: Any, now: Optional[datetime] = Non
     if now.hour < SLOT_HOUR:
         return
 
-    # Same gate the nightly sweep uses, and for the same reason: the study
-    # reads through the local engine's bridge and writes its measurement
-    # columns to the local database. A remote node running it duplicates the
-    # broker load to measure a book it is not keeping.
-    if await db_module.to_db_thread(db_module.is_remote_node):
+    # Only on the active trader (owner, 2026-10-22): the study measures the
+    # book this node keeps -- closed trades, their excursions and fill costs
+    # -- through this node's bridge, into this node's database. A node that
+    # is not trading would duplicate the broker load to measure a book nobody
+    # adds to. This was `is_remote_node()` until then, which ran it on the Mac
+    # every night after the VPS took over trading, and never on the VPS.
+    from backend.src.services.cluster import node_roles
+    if not await db_module.to_db_thread(node_roles.is_active_trader_node):
         return
 
     date_str = now.strftime("%Y-%m-%d")

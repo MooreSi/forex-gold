@@ -125,6 +125,24 @@ describe("risk", () => {
     expect(JSON.parse(writes()[0][1].body)).toEqual({ internal_hedge_mode: "net_exposure" });
   });
 
+  it("offers never adding to a loser and counting open risk, both off", async () => {
+    // docs/todo/026 (owner, 2026-10-22). Both refuse real orders when on, so
+    // they arrive off, and each write names its own column.
+    render(<RiskSection />);
+    await screen.findByLabelText("Risk per trade (%)");
+
+    const loser = screen.getByLabelText("Never add to a loser");
+    const openRisk = screen.getByLabelText("Count open risk toward the daily loss limit");
+    expect(loser).not.toBeChecked();
+    expect(openRisk).not.toBeChecked();
+    expect(within(screen.getByTestId("risk-daily_limit_counts_open_risk"))
+      .getAllByText(/Same limit, same day and same Resume as Max daily loss/).length).toBeGreaterThan(0);
+
+    await userEvent.click(loser);
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ never_add_to_loser_enabled: 1 });
+  });
+
   it("says when a setting does nothing because its switch is off", async () => {
     // "I turned it on and it made no difference" is how a setting gets
     // reported as broken.

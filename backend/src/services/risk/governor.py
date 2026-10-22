@@ -473,9 +473,7 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
     # day. +$37.87, Resume, -$63.84 is a day at -$25.97, not -$63.84 (owner,
     # 2026-10-08). The daily goal no longer has a window to mirror: it counts
     # the whole day (2026-10-10).
-    window, _peak = day_pnl_and_peak(_daily_loss_window_start())
-    day, _peak = day_pnl_and_peak(calendar_day_start_ts())
-    realised = window + max(day - window, 0.0)
+    realised = daily_loss_realised()
     day_base = balance - realised
     if day_base <= 0:
         return None
@@ -486,6 +484,14 @@ def check_daily_loss_limit(rs: dict, balance: float) -> Optional[str]:
         f"Daily loss limit hit: ${realised:.2f} today vs -${abs(limit):.2f} "
         f"({max_daily:.1f}% of ${day_base:,.2f})"
     )
+
+
+def daily_loss_realised() -> float:
+    """Today's realised P&L as the daily loss limit counts it (see above).
+    One definition, shared with position_guards (docs/todo/026)."""
+    window, _peak = day_pnl_and_peak(_daily_loss_window_start())
+    day, _peak = day_pnl_and_peak(calendar_day_start_ts())
+    return window + max(day - window, 0.0)
 
 
 def apply_daily_loss_halt_on_close(rs: dict, balance: float) -> None:

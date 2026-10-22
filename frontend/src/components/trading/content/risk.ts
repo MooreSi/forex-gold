@@ -125,6 +125,11 @@ export const RISK_GROUPS: RiskGroup[] = [
         label: "Move stops to breakeven once reached",
       },
       { key: "daily_goal_value", label: "Daily goal", kind: "number", goal: true },
+      {
+        key: "daily_limit_counts_open_risk", kind: "toggle",
+        label: "Count open risk toward the daily loss limit",
+        hint: "Refuses a new order when today's closed loss, plus what every open trade loses at its stop, plus this order's risk, would pass the max daily loss. The limit alone counts only closed trades, so on 2026-10-22 it tripped with a third trade already open. Same limit, same day and same Resume as Max daily loss. Try it on demo first.",
+      },
     ],
   },
   {
@@ -203,6 +208,11 @@ export const RISK_GROUPS: RiskGroup[] = [
         key: "burst_hedge_guard_enabled",
         label: "One direction per queued-signal release", kind: "toggle",
         hint: "After a pause, the backlog empties in one pass. This stops it opening both sides.",
+      },
+      {
+        key: "never_add_to_loser_enabled",
+        label: "Never add to a loser", kind: "toggle",
+        hint: "Refuses a new order while an open trade in the same direction, from any channel or engine, is losing at the current price. Orders added that way since July lost three times as much per trade. Try it on demo first.",
       },
       {
         key: "internal_hedge_mode", label: "Hedging", kind: "choice",

@@ -65,6 +65,7 @@ _PROTECTIVE_KEYS = frozenset({
     "circuit_breaker_enabled", "circuit_breaker_losses", "max_open_trades",
     "giveback_guard_enabled", "cooldown_after_loss_min", "auto_execute_signals",
     "daily_goal_enabled", "daily_goal_protect_be", "contradiction_review_enabled",
+    "never_add_to_loser_enabled", "daily_limit_counts_open_risk",
 })
 
 

@@ -565,3 +565,37 @@ the ML feature uses.
   0.0, so the scalar is always 1.0. The same reader feeds the ML feature
   `equity_drawdown_pct`, which is 0 in all 7,553 stored vectors. Not fixed
   here; raised as its own task.
+
+## Never add to a loser; open risk counts toward the daily limit (2026-10-22, docs/todo/026)
+
+Two Risk toggles, both **off** (migration 65, synced): `never_add_to_loser_enabled`
+under Exposure and `daily_limit_counts_open_risk` under Stopping for the day.
+`services/risk/position_guards.check` runs in `open_trade` once the live price
+is known, after the breaker and max-open-trades checks, so every market order
+(every channel, every engine, Set & Forget, the Market Order dialog, orders
+forwarded to the VPS) passes it. It only refuses; it never opens, closes or
+moves anything.
+
+- **"Losing" is ask below a BUY's entry, bid above a SELL's.** Comparing the
+  price a trade opens at keeps the spread out, so a trade that opened a moment
+  ago is not a loser. A grid placeholder's `entry_price` is 0 until its fill is
+  matched and is skipped, as are rows of the signal being opened.
+- **The daily loss limit is `check_daily_loss_limit`, not `rg_check_halt`.**
+  Two functions compute "the daily loss limit". `rg_check_halt` runs only with
+  the Risk Governor on and counts the broker day; `check_daily_loss_limit`
+  runs after every close regardless, counts the trading-clock day from the
+  last manual Resume, and is the halt that fired on 2026-10-22. The guard was
+  first written against the wrong one. `governor.daily_loss_realised` is now
+  the one definition of that halt's "realised today" (extracted verbatim), and
+  the guard reads it.
+- **Open risk is loss at the current stop, never below 0**, with the row's
+  `initial_risk` used when the stop has not moved and it is larger (a grid
+  row's lots describe one leg). A new grid-template order counts every leg.
+- **Not covered:** a resting limit order fills at the broker without passing
+  `open_trade`, and positions the app did not open are not in
+  `vantage_simulated_trades`.
+- At 2.1% risk a trade against a 4% limit, the open-risk switch means one loss
+  ends new trading for the day.
+
+Pinned by `tests/risk/test_position_guards.py` (including the 2026-10-22
+sequence) and `RiskSection.test.tsx`. **Not yet through a demo session.**

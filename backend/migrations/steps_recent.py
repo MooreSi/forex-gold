@@ -348,4 +348,12 @@ _RECENT: list[tuple[int, str, object]] = [
             computed_at  REAL NOT NULL
         )""",
     ]),
+
+    # Risk > Adding to a position (docs/todo/026, owner 2026-10-22). Both off:
+    # every order is placed exactly as before until a switch is ticked, and
+    # each refuses real orders once it is, so demo first.
+    (65, "Never add to a loser; count open risk toward the daily limit (off)", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN never_add_to_loser_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE vantage_risk_settings ADD COLUMN daily_limit_counts_open_risk INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]

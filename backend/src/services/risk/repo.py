@@ -57,6 +57,21 @@ def count_unprotected_same_direction(direction: str) -> int:
         ).fetchone()[0]
 
 
+def open_positions_for_guards() -> list[dict]:
+    """Every open trade, whatever opened it, with what `position_guards`
+    needs: its direction, fill, current and first stop, lots and recorded
+    risk."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT signal_id, direction, entry_price, stop_loss, initial_sl, "
+            "remaining_lots, lot_size, initial_risk FROM vantage_simulated_trades "
+            "WHERE status='open'"
+        ).fetchall()
+    keys = ("signal_id", "direction", "entry_price", "stop_loss", "initial_sl",
+            "remaining_lots", "lot_size", "initial_risk")
+    return [dict(zip(keys, r)) for r in rows]
+
+
 def sum_realised_pnl_since(day_start: float) -> float:
     """Today's closed P&L for the daily-loss halt -- from `net_pnl`, not
     `realised_pnl`, whatever this function is called.

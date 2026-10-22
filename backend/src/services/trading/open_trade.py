@@ -36,7 +36,7 @@ from backend.src.services.trading.send_dedup import (
 )
 from backend.src.services.broker import ea_templates as ea_templates, template_presence
 from backend.src.services.positions.core_pips import PIPS_TO_PRICE_XAUUSD
-from backend.src.services.risk import lot_sizing
+from backend.src.services.risk import lot_sizing, position_guards
 from backend.src.services.risk.governor import is_trading_paused, price_in_entry_range
 from backend.src.utils.models import (
     Tick, CONTRACT_SIZE, STRATEGY_SCALE_OUT, STRATEGY_BE_RUNNER,
@@ -408,8 +408,7 @@ async def open_trade(
     # Excluding this signal's own claim: the scheduler claims the slot and
     # THEN calls here, so counting it would refuse every trade the normal
     # path makes (pinned by tests/trading/test_max_trades_counts_live_trades).
-    open_count = signal_state_repo.count_trade_slots_used(
-        exclude_signal_id=signal_id)
+    open_count = signal_state_repo.count_trade_slots_used(exclude_signal_id=signal_id)
     if open_count >= int(rs.get("max_open_trades", 1)):
         raise ValueError(
             f"Max open trades reached ({rs.get('max_open_trades', 1)}) — "
@@ -422,6 +421,7 @@ async def open_trade(
         tick = await bridge.get_fresh_tick()
     if tick is None:
         raise RuntimeError("No live price available")
+    await position_guards.check(bridge, signal_id=signal_id, direction=direction, stop_loss=stop_loss, lot_size=lot_size, strategy=strategy, tick=tick, rs=rs)  # docs/todo/026
 
     if mt5_tp_override is not None:
         # Adaptive Runner ladder legs (see open_adaptive_runner_ladder):

@@ -190,4 +190,6 @@ SYNCED_SETTINGS_KEYS = (
     # Where a template's stop and targets land (migration 63): they act on
     # whichever node trades.
     "round_number_exits_enabled", "vol_forecast_stops_enabled",
+    # Adding to a position (migration 65): they refuse on whichever node trades.
+    "never_add_to_loser_enabled", "daily_limit_counts_open_risk",
 )

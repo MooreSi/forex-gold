@@ -111,6 +111,27 @@ Why: until 2026-10-21 the About page showed "—" for every release with no
 notes, because the route sent `RELEASES`' raw tuples and nobody looked at the
 page after a bump. The owner reported it as "isn't updating".
 
+### Every install route must leave a machine able to update itself
+
+Updates are `git fetch` + `checkout`, so a machine without git can never
+update, and an admin-console push to it fails with "git not found on PATH".
+The app does not assume an installer gave it git: on Windows,
+`core_git_install.ensure_git()` downloads PortableGit at startup when none is
+found (spec 027). That exists because a third-party repackaged zip ran neither
+of our installers (2026-10-23).
+
+So, on any release:
+
+- a new way to install or package the app (a zip, a script, an image) must
+  end with git on the machine and the files a checkout, or rely on the app's
+  own `ensure_git()` and say so;
+- the PortableGit URL **and SHA-256** are pinned in three places that move
+  together: `backend/src/services/positions/core_git_install.py`,
+  `Setup & Start FOREX.bat` and `installer/FOREX_Trader_Setup.iss` (URL only;
+  the .iss does not check the hash yet). Take the hash from the release's own
+  asset digest. `tests/positions/test_git_self_install.py::TestOnePinEverywhere`
+  fails when they disagree.
+
 ---
 
 ## Things that look safe and are not

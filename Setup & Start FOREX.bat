@@ -111,7 +111,7 @@ set "_PY_INST=%TEMP%\python-3.11.9-amd64.exe"
 set "_PY_DIR=%LOCALAPPDATA%\Programs\Python\Python311"
 
 powershell -NoProfile -Command ^
-  "try { Invoke-WebRequest -Uri '%_PY_URL%' -OutFile '%_PY_INST%' -UseBasicParsing } catch { Write-Host ('Download error: ' + $_.Exception.Message); exit 1 }"
+  "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { Invoke-WebRequest -Uri '%_PY_URL%' -OutFile '%_PY_INST%' -UseBasicParsing } catch { Write-Host ('Download error: ' + $_.Exception.Message); exit 1 }"
 
 if !errorlevel! neq 0 (
     echo  ERROR: Download failed. Check your internet connection and try again.
@@ -217,9 +217,15 @@ if !errorlevel! neq 0 (
     ) else (
         echo  Git not found - downloading portable Git ^(one-time setup^)...
         set "_GIT_URL=https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe"
+        set "_GIT_SHA256=ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d"
         set "_GIT_INST=%TEMP%\PortableGit-64-bit.7z.exe"
+        rem TLS 1.2 is forced because Windows PowerShell 5.1 on older Windows
+        rem Server offers less, and GitHub refuses it. The SHA-256 is the
+        rem release's own; a download that does not match is deleted, never run.
+        rem The same URL and hash are pinned in core_git_install.py and the .iss
+        rem by spec 027 -- change all three together.
         powershell -NoProfile -Command ^
-          "try { Invoke-WebRequest -Uri '!_GIT_URL!' -OutFile '!_GIT_INST!' -UseBasicParsing } catch { Write-Host ('Download error: ' + $_.Exception.Message); exit 1 }"
+          "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { Invoke-WebRequest -Uri '!_GIT_URL!' -OutFile '!_GIT_INST!' -UseBasicParsing } catch { Write-Host ('Download error: ' + $_.Exception.Message); exit 1 }; if ((Get-FileHash -Algorithm SHA256 '!_GIT_INST!').Hash -ne '!_GIT_SHA256!') { Write-Host 'Download error: PortableGit failed its SHA-256 check'; Remove-Item -Force '!_GIT_INST!'; exit 1 }"
         if !errorlevel! == 0 if exist "!_GIT_INST!" (
             mkdir "!PORTABLE_GIT_DIR!" 2>nul
             "!_GIT_INST!" -y -o"!PORTABLE_GIT_DIR!" >nul

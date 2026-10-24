@@ -393,7 +393,13 @@ def _remote_client_enabled(config) -> bool:
 
 async def _link_checkout_at_startup() -> None:
     """Fire-and-forget wrapper: nothing about the app depends on this working,
-    so a failure is a log line, never a startup failure."""
+    so a failure is a log line, never a startup failure. A Windows machine
+    with no git gets one first, or linking and every update fail (spec 027)."""
+    try:
+        from backend.src.services.positions import core_git_install
+        await asyncio.to_thread(core_git_install.ensure_git)
+    except Exception as e:
+        log.debug("[startup] Git check could not run: %s", e)
     try:
         from backend.src.services.positions.core_app_update import link_checkout
         result = await link_checkout()

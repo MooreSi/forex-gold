@@ -15,11 +15,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.src.db import database as db_module
+from backend.src.utils import broker_clock as _broker_clock
 from backend.src.utils.trading_clock import local_from, local_timestamp
 
 log = logging.getLogger(__name__)
 
-BROKER_OFFSET = 10800  # the broker stores UTC+3 timestamps as-if-UTC
+# The US-summer offset only; conversions go through `utils.broker_clock`.
+BROKER_OFFSET = 10800
 
 # "No offset given, resolve it" as distinct from an explicit None, which means
 # "this machine's own clock" and is a real answer rather than a missing one.
@@ -46,7 +48,7 @@ def broker_day_cutoff(offset_minutes=_UNSET, now: datetime = None) -> float:
         offset_minutes = _clock.offset_minutes()
     local = local_from(now, offset_minutes)
     midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    return local_timestamp(midnight, offset_minutes) + BROKER_OFFSET
+    return _broker_clock.utc_to_broker(local_timestamp(midnight, offset_minutes))
 
 
 def _platform_fee_rate() -> float:
@@ -120,7 +122,7 @@ async def compute_mt5_performance(bridge: Any, days: int = 90,
             if not close_deal:
                 continue
             close_ts = float(close_deal.get("time", 0))
-            if since_ts is not None and close_ts - BROKER_OFFSET < since_ts:
+            if since_ts is not None and _broker_clock.broker_to_utc(close_ts) < since_ts:
                 continue
             _open_deal = next((d for d in pos_deals if d.get("entry") == 0), None)
             _open_lots = float(_open_deal.get("volume", 0)) if _open_deal else float(close_deal.get("volume", 0))

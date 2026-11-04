@@ -179,13 +179,14 @@ class TestTheTwoNodesNowAgree:
     def test_with_no_offset_it_is_the_machines_own_clock(self, monkeypatch):
         """The other half of the design, and the reason the two tests above
         had to pin: with no offset configured the answer IS the machine's local
-        time, whatever that is. Asserted against the machine's own reported
-        offset so it holds in any zone."""
+        time, whatever that is. Asserted against the machine's own offset AT
+        THAT INSTANT so it holds in any zone and any season: today's offset
+        (`machine_offset_minutes`) is an hour out for a July date in a UK winter."""
         from datetime import timezone as _tz
 
         from backend.src.utils import trading_clock as uk_clock
 
         instant = datetime(2026, 7, 15, 12, 0, tzinfo=_tz.utc)
-        machine = uk_clock.machine_offset_minutes()
+        machine = int(instant.astimezone().utcoffset().total_seconds() // 60)
 
         assert uk_clock.local_from(instant) == uk_clock.local_from(instant, machine)

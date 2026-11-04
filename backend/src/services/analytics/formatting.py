@@ -26,6 +26,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Optional
 
+from backend.src.utils import broker_clock as _broker_clock
 from backend.src.utils.trading_clock import local_from_timestamp
 
 __all__ = [
@@ -33,7 +34,10 @@ __all__ = [
     "format_broker_ts", "format_duration", "to_date", "broker_ts_to_local_date",
 ]
 
-BROKER_OFFSET = 10800  # broker stores UTC+3 timestamps as-if-UTC
+# The US-summer offset only: the broker is UTC+2 the rest of the year. Convert
+# with `utils.broker_clock`; this stays for `todays_realised.realised_since`,
+# which the daily goal halts on and is not changed without owner sign-off.
+BROKER_OFFSET = 10800
 
 # Distinguishes "no offset given, resolve it yourself" from an explicit None,
 # which means "this machine's own clock" and is a real answer. They behave the
@@ -97,7 +101,7 @@ def broker_ts_to_local_date(ts, offset_minutes=_UNSET) -> Optional[date]:
     one bad timestamp must not take the page down.
     """
     try:
-        real_utc_epoch = float(ts) - BROKER_OFFSET
+        real_utc_epoch = _broker_clock.broker_to_utc(float(ts))
     except (TypeError, ValueError):
         return None
     # OSError: CPython on Windows refuses a negative epoch, in fromtimestamp

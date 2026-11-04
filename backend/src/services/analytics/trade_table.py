@@ -40,6 +40,7 @@ from backend.src.services.analytics import trade_excursion as _excursion
 from backend.src.services.broker import fees as _fees
 from backend.src.services.positions import spread_cache_repo as _spreads
 from backend.src.services.risk import clock as _clock
+from backend.src.utils import broker_clock as _broker_clock
 from backend.src.utils.models import CONTRACT_SIZE
 
 log = logging.getLogger(__name__)
@@ -57,9 +58,8 @@ _MAX_TP_DELAY_SECS = 1800
 # Vantage XAUUSD: one pip is a $0.10 price move.
 _PIP = 10.0
 
-# The broker stores UTC+3 timestamps as-if-UTC. Imported rather than repeated
-# so a row's session and the calendar day it is filed under can never be
-# derived from two different readings of the same clock.
+# The broker's clock is UTC+3 in the US summer and UTC+2 otherwise. A row's
+# session and its calendar day are both read through `utils.broker_clock`.
 _BROKER_OFFSET = _formatting.BROKER_OFFSET
 
 
@@ -78,7 +78,7 @@ def _session(close_ts: float) -> Optional[str]:
         return None
     try:
         hour = datetime.fromtimestamp(
-            float(close_ts) - _BROKER_OFFSET, tz=timezone.utc).hour
+            _broker_clock.broker_to_utc(float(close_ts)), tz=timezone.utc).hour
     except (TypeError, ValueError, OSError, OverflowError):
         return None
     return _pnl.session_for_hour(hour)
@@ -205,7 +205,7 @@ async def closed_trades(engine: Any, days: int, today: bool = False) -> dict:
             # Still open. The open-positions panel owns those.
             continue
         close_deal = max(closes, key=lambda d: d.get("time", 0))
-        if since is not None and float(close_deal.get("time", 0)) - _BROKER_OFFSET < since:
+        if since is not None and _broker_clock.broker_to_utc(float(close_deal.get("time", 0))) < since:
             continue
         open_deal = next((d for d in pos_deals if d.get("entry") == _ENTRY_IN), None)
 

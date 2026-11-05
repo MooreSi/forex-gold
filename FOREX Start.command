@@ -228,6 +228,9 @@ if [ ! -f "$MARKER" ] || [ "$STORED_HASH" != "$CURRENT_HASH" ]; then
 
     # ── Install / upgrade Python dependencies ─────────────────────────────────
     echo "  Installing / upgrading dependencies (this may take a minute)..."
+    # Newest version with a wheel: a source-only release needs a compiler
+    # (cryptg 0.6.1 stopped the Windows VPS from starting on 2026-11-05).
+    export PIP_PREFER_BINARY=1
     "$VENV_DIR/bin/pip" install --quiet --upgrade pip
     # A failed install must stop here. Falling through wrote the marker below,
     # so every later launch skipped setup and crashed on a missing module

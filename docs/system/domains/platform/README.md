@@ -789,3 +789,30 @@ attempt the provider reported is not in this repo or the VPS's app log; its
 source is unidentified. The reason the VPS could not reach the admin server on
 217.155.25.160:8443 (it had been failing with `WinError 121` since at least
 2026-10-12 00:02) was not diagnosed.
+
+## A launch ran pip every time, and a source-only release stopped the VPS (2026-11-05)
+
+The VPS rebooted unexpectedly at 14:42 (System events 41 and 6008; cause not
+known) and the app did not come back: `Setup & Start FOREX.bat` failed on
+`cryptg`, whose 0.6.1 release of 2026-11-04 has a source archive and no wheels,
+so pip tried to compile it with no Rust on the machine. 0.6.0 was installed and
+working the whole time.
+
+The requirements hash should have skipped that install, and did not: an
+unescaped `)` in an `echo` closed the `if DO_INSTALL` block early, so **the
+install ran on every launch**. cmd.exe confirmed it on the VPS with a probe
+script. Each restart was also moving every unpinned package to its newest
+version. **In a `.bat`, a `(` or `)` in text inside a parenthesised block must
+be written `^(` and `^)`.**
+
+The launcher now escapes that line and sets `PIP_PREFER_BINARY=1`, as does
+`FOREX Start.command`, because a first install or a requirements change still
+runs `--upgrade` and would otherwise hit the same release. Pinned by
+`tests/core/test_launcher_dependency_install.py`.
+
+`Stop FOREX.bat` and `Windows Uninstall.bat` have the same unescaped `)` in
+`echo` lines inside blocks and have not been changed.
+
+**A VPS with no listener on 8888 is not necessarily down.** The log line "FOREX
+Trader started on port 8888" prints in headless mode too, where
+`headless_mode_enabled = 1` in the account database means no web UI at all.

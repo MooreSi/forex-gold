@@ -181,9 +181,13 @@ if exist "%MARKER%" (
     )
 )
 
+:: Take the newest version that has a wheel. Plain --upgrade picks the newest
+:: release even if it is source-only, and this machine has no compiler: cryptg
+:: 0.6.1 stopped the VPS from starting that way on 2026-11-05.
+set "PIP_PREFER_BINARY=1"
 if "!DO_INSTALL!"=="1" (
     echo  Installing / updating dependencies - please wait...
-    echo  (This only runs when requirements change or on first launch.)
+    echo  ^(This only runs when requirements change or on first launch.^)
     echo.
     "%VENV_PYTHON%" -m pip install --quiet --upgrade pip
     "%VENV_PYTHON%" -m pip install --quiet --upgrade -r "%REQ_FILE%"

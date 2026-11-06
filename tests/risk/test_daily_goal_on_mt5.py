@@ -14,10 +14,10 @@ import asyncio
 import time
 
 from backend.src.db import database as db
-from backend.src.services.analytics import formatting as fmt
 from backend.src.services.analytics import todays_realised as todays
 from backend.src.services.risk import daily_goal as dg
 from backend.src.services.risk import governor as rg
+from backend.src.utils import broker_clock
 
 from tests.core.test_giveback_guard import _closes
 
@@ -141,8 +141,8 @@ def test_a_secured_halt_is_not_lifted_without_an_mt5_figure(fresh_db, monkeypatc
 # ── todays_realised.realised_since: the window over MT5's rows ───────────────
 
 def _row(epoch, pnl):
-    """A closed-trade row; MT5 stamps closes in broker time (UTC+3) as-if-UTC."""
-    return {"close_ts": epoch + fmt.BROKER_OFFSET, "pnl": pnl}
+    """A closed-trade row; MT5 stamps closes in broker time as-if-UTC."""
+    return {"close_ts": broker_clock.utc_to_broker(epoch), "pnl": pnl}
 
 
 def test_realised_since_sums_closes_at_or_after_the_window():

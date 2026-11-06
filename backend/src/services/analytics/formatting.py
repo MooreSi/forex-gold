@@ -35,8 +35,7 @@ __all__ = [
 ]
 
 # The US-summer offset only: the broker is UTC+2 the rest of the year. Convert
-# with `utils.broker_clock`; this stays for `todays_realised.realised_since`,
-# which the daily goal halts on and is not changed without owner sign-off.
+# with `utils.broker_clock`.
 BROKER_OFFSET = 10800
 
 # Distinguishes "no offset given, resolve it yourself" from an explicit None,

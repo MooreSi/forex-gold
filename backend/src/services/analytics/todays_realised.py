@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 from backend.src.services.analytics import formatting as _fmt
 from backend.src.services.analytics import trade_table as _trade_table
+from backend.src.utils import broker_clock as _broker_clock
 
 __all__ = ["for_today", "since", "reset_cache", "performance"]
 
@@ -57,16 +58,17 @@ def realised_since(table: dict, since_ts: float) -> Optional[float]:
     None when MT5 could not answer.
 
     The daily goal's day (`risk/daily_goal._goal_day_start`): 00:00 on the
-    trading clock. Rows carry MT5's broker-time
-    stamp, so the offset comes off before comparing, exactly as `realised_on`
-    files a row to its day.
+    trading clock. Rows carry MT5's broker-time stamp, so it is converted to
+    the real instant before comparing, exactly as `realised_on` files a row to
+    its day. A fixed 3 hours until 2026-11-06: in the US winter the broker is
+    UTC+2, so the goal lost the day's first hour and let trading run past it.
     """
     if not table or table.get("error"):
         return None
     total = 0.0
     for row in table.get("rows") or []:
         ts = row.get("close_ts")
-        if ts and float(ts) - _fmt.BROKER_OFFSET >= since_ts:
+        if ts and _broker_clock.broker_to_utc(ts) >= since_ts:
             total += float(row.get("pnl") or 0.0)
     return round(total, 2)
 

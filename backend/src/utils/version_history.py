@@ -7,6 +7,42 @@
 
 RELEASES: list[tuple] = [
     (
+        "v0.616",
+        "Bug fixes, security enhancements and general improvements",
+        "blue",
+        "",
+        [
+            "Bug fixes: MT5 times are read on the broker's real clock, which "
+            "moved to UTC+2 on 1 November, so closes in the first hour of the "
+            "UTC day are filed under the right day and count towards the daily "
+            "goal, which could otherwise halt trading late.",
+            "Bug fixes: the app's launcher no longer runs pip on every start "
+            "and prefers ready-built packages, so a new package release that "
+            "needs a compiler cannot stop the app coming back after a restart.",
+            "Bug fixes: the Reversal Engine reads silver, platinum, the dollar "
+            "index, the S&P, VIX and oil live and by your broker's own symbol "
+            "names, and measures again the days stored without them. The "
+            "nightly research study now runs on the node that trades, which "
+            "fills the Dashboard's Fill cost card.",
+            "Security enhancements: the dashboard's build and test tools "
+            "(Vite, Vitest and source-map-js) are updated to close all five "
+            "open Dependabot alerts. They are developer tools that do not ship "
+            "in the app, and the dashboard itself is unchanged.",
+            "Security enhancements: the app and Windows setup check PortableGit "
+            "against its pinned SHA-256 before running it, and Windows setup "
+            "forces TLS 1.2 for its downloads.",
+            "General improvements: two new Risk switches, both off by default: "
+            "never add to a losing trade (also refused while a same-direction "
+            "order is in flight), and count open risk toward the daily loss "
+            "limit.",
+            "General improvements: Settings > Remote can merge ML training data "
+            "between the Mac and the VPS (both need this version). A node only "
+            "learns from the other's history if that scores at least as well "
+            "on its newest rows. The app also installs its own git on Windows "
+            "when a machine has none, so it can update itself.",
+        ],
+    ),
+    (
         "v0.615",
         "Analytics, more AI providers and news on the charts",
         "blue",

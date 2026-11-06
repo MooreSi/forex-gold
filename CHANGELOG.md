@@ -1,3 +1,50 @@
+## v0.616 — Bug fixes, security enhancements and general improvements (2026-11-06)
+
+The About screen carries the user-facing summary; this is the engineering
+record. 11 commits since v0.615, plus the dependency fix and this release's own.
+
+**Bug fixes**
+- `utils/broker_clock.py`: the broker is UTC+2 in the US winter, not a fixed
+  UTC+3. The day and session a close is filed under, the trade table's since
+  filter, `mt5_performance` and `todays_realised.realised_since` (the daily
+  goal, its % opening balance and `goal_breakeven`) convert through it.
+- Launcher: an unescaped `)` ran the install on every start. Escaped, and
+  `PIP_PREFER_BINARY` set in the Windows and Mac launchers.
+- Cross-asset peers: `mt5_symbols.py` resolves the broker's name for a symbol;
+  `/candles_range` puts every non-gold symbol in Market Watch before reading
+  and takes a peer's offset from gold's quote; `xasset_sweep` re-measures days
+  stored with a peer missing and stops retrying a broker with no peers.
+- The nightly research study gates on `is_active_trader_node()`.
+
+**Security enhancements**
+- `frontend/package-lock.json`: vite 6.4.3 to 6.4.5, vitest and @vitest/mocker
+  4.1.11 to 4.1.12, source-map-js 1.2.1 to 1.2.2, closing Dependabot alerts 1-5
+  (GHSA-68fv-2mgg-jv7q, GHSA-xp26-3454-mjgp, GHSA-qxg6-89mg-rqv8,
+  GHSA-698v-4r3x-3vcv, GHSA-rq7h-c2jc-7f22). Development scope only; rebuilding
+  gives a byte-identical `frontend/dist`.
+- PortableGit is checked against its pinned SHA-256 by the app and
+  `Setup & Start FOREX.bat`; the .bat forces TLS 1.2. The .iss does not check
+  the hash yet.
+
+**General improvements**
+- Risk switches, off by default (migration 65): `never_add_to_loser_enabled`,
+  also refusing while a same-direction signal is in flight, and
+  `daily_limit_counts_open_risk`. Both only refuse.
+- ML training data merge between nodes (docs/todo/026): imported rows go to
+  `ml_imported_rows`, used only by training sets with the kind's switch on.
+- `core_git_install.ensure_git()` installs PortableGit at startup on Windows
+  when the machine has no git (spec 027).
+
+**Not done or not yet exercised**
+- `governor.rg_day_start_ts` stays on the fixed 3 hours; it decides halts and
+  needs its own sign-off.
+- No demo session has run with either Risk switch on. The Market Order dialog's
+  orders are not seen while in flight.
+- `ensure_git()` had not run on Windows, and the peer reads had not run against
+  a real terminal, when those changes were committed.
+- `Stop FOREX.bat` and `Windows Uninstall.bat` keep the same unescaped `)`, and
+  requirements stay unpinned.
+
 ## v0.615 — Analytics, more AI providers and news on the charts (2026-10-21)
 
 The About screen carries the user-facing summary; this is the engineering

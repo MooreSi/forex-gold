@@ -36,6 +36,13 @@ the STOP first. That is the pessimistic choice, and deliberately the opposite
 of the existing simulators' optimistic "assume TP1 hit first" -- a template
 backtest that flatters itself is the failure mode worth avoiding. Ticks remove
 the ambiguity entirely; see phase 1 of the scope.
+
+THE TWO WALKS NO LONGER SHARE EVERY RULE. `simulate_ticks` was brought into
+line with MoveSl and ManageTemplate on 2026-11-06 (its docstring lists how).
+`simulate` was deliberately left as it was, and still has every one of those
+gaps: no guard clamp, TP levels fill at the level, a zero-lot level latches, a
+`tp` trail and a breakeven only move on a latched level, and with no
+trail_activation the trail never arms. See the engines domain README.
 """
 from __future__ import annotations
 
@@ -74,6 +81,10 @@ _SUPPORTED_TRAIL_MODES = ("off", "", "step", "candle", "tp")
 # lookback, it diverges from the EA. Tracked as a known bar-walk fidelity gap
 # in docs/todo/backtest/010 rather than fixed here or silently inherited.
 _SUPPORTED_TICK_TRAIL_MODES = ("off", "", "step", "tp")
+
+# InpDefaultTrailStopPts (default 5.0): the EA's fallback when trail_distance
+# is 0, a raw price delta rather than pips. An EA input, so a chart can differ.
+_EA_DEFAULT_TRAIL_DISTANCE = 5.0
 
 
 class UnsupportedTemplate(Exception):
@@ -395,21 +406,49 @@ def simulate(template: dict, bars: list, entry: float, is_buy: bool,
 
 
 def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
-                    balance: float = 10_000.0) -> TemplateResult:
+                    balance: float = 10_000.0,
+                    stops_level_points: float = 0.0) -> TemplateResult:
     """Walk `ticks` under `template`, starting from a fill at `entry`.
 
-    Same rules as `simulate()`, but resolved against actual bid/ask instead
-    of a bar's high/low -- the same-bar "stop or target first" ambiguity that
-    walk resolves pessimistically does not exist here, because a real tick
-    can only be on one side of a level at a time.
+    Resolved against actual bid/ask instead of a bar's high/low -- the
+    same-bar "stop or target first" ambiguity that `simulate()` resolves
+    pessimistically does not exist here, because a real tick can only be on
+    one side of a level at a time.
 
     Every comparison uses the side ManageTemplate() itself reads off the
-    live `MqlTick` (mql5:2696-2941): a BUY marks against `tick.bid` (what you
-    could sell it for right now, matching TpCleared()'s `tick.bid >= val` and
-    the three `favMove`/`inProfit` reads), a SELL against `tick.ask`. Getting
-    this backwards would make every fill look worse than the EA's for a BUY
-    and better for a SELL, in a way that would not show up as an obviously
-    wrong number -- it would just be quietly biased.
+    live `MqlTick`: a BUY marks against `tick.bid` (what you could sell it for
+    right now, matching TpCleared()'s `tick.bid >= val` and the `favMove`/
+    `inProfit` reads), a SELL against `tick.ask`. Getting this backwards would
+    make every fill look worse than the EA's for a BUY and better for a SELL,
+    in a way that would not show up as an obviously wrong number -- it would
+    just be quietly biased.
+
+    Where this walk and `simulate()` differ, this one is the EA's. Read out of
+    ManageTemplate() and MoveSl() on 2026-11-06, after a replay of real trades
+    showed the difference:
+
+      * Every stop move goes through MoveSl's clamp: no closer to price than
+        max(stops level, guard_pips, safety_cap_pips). `stops_level_points`
+        is SYMBOL_TRADE_STOPS_LEVEL, in points. History records no value for
+        it, so the default of 0 leaves only the template's own two floors.
+      * Breakeven is done when MoveSl SUCCEEDS, including with a clamped stop
+        short of entry, and is not retried after that. It arms off the latch
+        or, for a level that never trades, the live price.
+      * The `tp` trail picks its level from the live price every tick, not
+        from the latch, so it also moves on a level that never traded.
+      * With no trail_activation the trail is always armed and
+        tp1_trigger_level is not consulted. The activation is a live test.
+      * The step gate measures the unclamped candidate.
+      * A level with no lots to close does NOT latch: DoPartialClose returns
+        before setting triggered[]. So it cannot arm tp1_trigger_level.
+      * Partial closes and DoCloseAll trade at the tick. Only a broker-side TP
+        fills at its level, and HandleOpenTrade sets one only for
+        tpsl_mode=on with close_full_on_last.
+      * be_trigger and tp1_trigger_level name a TP NUMBER. tp[] keeps its gaps
+        on the EA side, so one naming an undefined level never arms.
+
+    A stop still fills at its own price, gap or no gap: a real stop on a gap
+    fills at the next price, which this does not model.
 
     `ticks` is `[{"time": ts, "bid": b, "ask": a}, ...]`, ascending by time.
     Raises UnsupportedTemplate for anything `simulate()` refuses, plus
@@ -424,32 +463,62 @@ def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
     stop: Optional[float] = (entry - sign * sl_distance) if sl_distance > 0 else None
     ladder = _ladder(template, entry, sign)
     triggered = [False] * len(ladder)
+    # `ladder` drops undefined levels; the EA's triggers index tp[] with its
+    # gaps intact, so a TP number has to be translated, not used as a position.
+    tp_numbers = [n for n in range(1, _MAX_TP_LEVELS + 1)
+                  if _f(template, f"tp{n}_pips", 0.0) > 0]
 
-    ladder_on = str(template.get("tpsl_mode") or "on").strip().lower() != "off"
+    def _position_of(tp_number: int) -> Optional[int]:
+        return tp_numbers.index(tp_number) if tp_number in tp_numbers else None
+
+    tpsl_mode = str(template.get("tpsl_mode") or "on").strip().lower()
+    ladder_on = tpsl_mode != "off"
     partials_on = bool(_f(template, "partials", 1))
     close_full_on_last = bool(_f(template, "close_full_on_last", 0))
+    broker_holds_last_tp = tpsl_mode == "on" and close_full_on_last
 
-    be_level = int(_f(template, "be_trigger", 0))
+    be_position = _position_of(int(_f(template, "be_trigger", 0)))
     be_mode = str(template.get("be_mode") or "entry").strip().lower()
     be_buffer = _f(template, "be_buffer_pts", 0.0)
+    be_done = False
 
     trail_mode = str(template.get("trail_mode") or "off").strip().lower()
     trail_dist = pips_to_price(_f(template, "trail_distance", 0.0))
+    if trail_dist <= 0:
+        trail_dist = _EA_DEFAULT_TRAIL_DISTANCE
     trail_pad = pips_to_price(_f(template, "trail_padding", 0.0))
     trail_act = pips_to_price(_f(template, "trail_activation", 0.0))
-    trail_level = int(_f(template, "tp1_trigger_level", 0))
+    trail_position = _position_of(int(_f(template, "tp1_trigger_level", 0)))
     trail_step = pips_to_price(_f(template, "trail_step", 0.0))
-    trail_armed = False
+
+    min_dist = max(float(stops_level_points) * _POINT,
+                   pips_to_price(_f(template, "guard_pips", 0.0)),
+                   pips_to_price(_f(template, "safety_cap_pips", 0.0)))
 
     res = TemplateResult(lot_size=lot, entry=entry, remaining_lots=lot)
 
-    def _favourable(mark: float) -> float:
-        return (mark - entry) * sign
+    def _cleared(position: int, mark: float) -> bool:
+        return (mark - ladder[position][0]) * sign >= 0
 
-    def _tighten(new_stop: float) -> None:
+    def _move_sl(wanted: float, mark: float) -> bool:
+        """MoveSl. True when the stop actually moved, which is what the EA's
+        breakeven latches on."""
         nonlocal stop
-        if stop is None or (new_stop - stop) * sign > 0:
-            stop = new_stop
+        if min_dist > 0:
+            floor = mark - sign * min_dist
+            if (wanted - floor) * sign > 0:
+                wanted = floor
+        # POSITION_SL reads 0.0 with no stop. Kept literal: a SELL's `better`
+        # test can then never pass, so the EA never gives one a stop here.
+        current = stop if stop is not None else 0.0
+        if (wanted - current) * sign <= 0:
+            return False
+        # Only reachable with no floor at all. The broker refuses a stop on
+        # the far side of price, so PositionModify fails and nothing moves.
+        if (wanted - mark) * sign > 0:
+            return False
+        stop = wanted
+        return True
 
     for idx, t in enumerate(ticks):
         mark = float(t["bid"]) if is_buy else float(t["ask"])
@@ -466,26 +535,26 @@ def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
             for i, (tp_price, pct) in enumerate(ladder):
                 if triggered[i]:
                     continue
-                reached = (mark >= tp_price) if is_buy else (mark <= tp_price)
-                if not reached:
+                if not _cleared(i, mark):
                     break
                 is_last = (i == len(ladder) - 1)
                 if is_last and (close_full_on_last or not partials_on):
-                    res.pnl_price += (tp_price - entry) * sign * res.remaining_lots
+                    fill = tp_price if broker_holds_last_tp else mark
+                    res.pnl_price += (fill - entry) * sign * res.remaining_lots
                     res.closed_lots.append(round(res.remaining_lots, 2))
                     res.remaining_lots = 0.0
                     triggered[i] = True
                     res.outcome = "tp"
-                    res.close_price = tp_price
+                    res.close_price = fill
                     res.close_bar = idx
                     break
                 if not partials_on:
                     break
                 lots = min(round(lot * pct, 2), res.remaining_lots)
-                triggered[i] = True
                 if lots <= 0:
                     continue
-                res.pnl_price += (tp_price - entry) * sign * lots
+                triggered[i] = True
+                res.pnl_price += (mark - entry) * sign * lots
                 res.closed_lots.append(lots)
                 res.remaining_lots = round(res.remaining_lots - lots, 2)
                 # A ladder whose levels sum to exactly 100% (the normal
@@ -496,7 +565,7 @@ def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
                 # every such trade reports outcome="tp" with close_price
                 # stuck at its 0.0 default.
                 if res.remaining_lots <= 0:
-                    res.close_price = tp_price
+                    res.close_price = mark
                     res.close_bar = idx
 
         if res.remaining_lots <= 0:
@@ -504,29 +573,32 @@ def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
                 res.outcome = "tp"
             break
 
-        if 0 < be_level <= len(ladder) and triggered[be_level - 1]:
-            _tighten(entry + sign * be_buffer if be_mode == "entry_buffer" else entry)
+        if not be_done and be_position is not None and (
+                triggered[be_position] or _cleared(be_position, mark)):
+            be_done = _move_sl(
+                entry + sign * be_buffer if be_mode == "entry_buffer" else entry,
+                mark)
 
-        if not trail_armed:
-            if trail_act > 0 and _favourable(mark) >= trail_act:
-                trail_armed = True
-            elif 0 < trail_level <= len(ladder) and triggered[trail_level - 1]:
-                trail_armed = True
+        trail_armed = True
+        if trail_act > 0:
+            trail_armed = (mark - entry) * sign >= trail_act
+            if not trail_armed and trail_position is not None:
+                trail_armed = triggered[trail_position]
 
         if trail_armed:
-            if trail_mode == "step" and trail_dist > 0:
+            if trail_mode == "step":
                 candidate = mark - sign * (trail_dist + trail_pad)
-                move = (candidate - stop) * sign if stop is not None else None
-                if stop is None or trail_step <= 0 or move >= trail_step:
-                    _tighten(candidate)
+                if (stop is None or trail_step <= 0
+                        or (candidate - stop) * sign >= trail_step):
+                    _move_sl(candidate, mark)
             elif trail_mode == "tp":
                 best = None
                 for i, (tp_price, _pct) in enumerate(ladder):
-                    if not triggered[i]:
+                    if not _cleared(i, mark):
                         break
                     best = tp_price
                 if best is not None:
-                    _tighten(best)
+                    _move_sl(best, mark)
 
     if res.remaining_lots > 0 and res.outcome == "timeout" and ticks:
         last = ticks[-1]

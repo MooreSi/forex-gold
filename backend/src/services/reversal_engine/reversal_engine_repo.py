@@ -94,6 +94,11 @@ def _run_migrations() -> None:
         # ATR against its own five-day median at creation (docs/todo/016).
         "ALTER TABLE re_signals ADD COLUMN atr_ratio REAL",
         "ALTER TABLE re_signals ADD COLUMN market_state_json TEXT",  # docs/todo/017
+        # A virtual trade managed by its own template (docs/todo/030): the
+        # walk's saved state, or why the ladder kept it; and that template's
+        # stop distance, which is what its R is measured against.
+        "ALTER TABLE re_signals ADD COLUMN virtual_exit_json TEXT",
+        "ALTER TABLE re_signals ADD COLUMN virtual_risk_pts REAL",
     ]
     for stmt in migrations:
         try:
@@ -255,6 +260,13 @@ def move_sl_to_be(sig_id: int, be_price: float | None = None) -> None:
         "UPDATE re_signals SET stop_loss=?, sl_moved_to_be=1 WHERE id=?",
         round(px, 2), sig_id,
     )
+
+
+def save_virtual_exit(sig_id: int, exit_json: str,
+                      risk_pts: Optional[float] = None) -> None:
+    """How a virtual trade is managed, and its template's stop distance."""
+    get_db().run("UPDATE re_signals SET virtual_exit_json=?, virtual_risk_pts=? WHERE id=?",
+                 exit_json, risk_pts, sig_id)
 
 
 def set_stop_loss(sig_id: int, price: float) -> None:
@@ -642,7 +654,7 @@ def fetch_ml_outcome_rows() -> list:
     """Completed, ML-scored RE signals -- the calibration-report corpus."""
     return get_db().all(
         "SELECT id, signal_ref, ml_prob, outcome, rr_tp1, sl_dist, net_pnl_dollars, "
-        "live_exec_status, vantage_signal_id FROM re_signals "  # executed: docs/todo/017
+        "live_exec_status, vantage_signal_id, virtual_risk_pts FROM re_signals "  # 017, 030
         "WHERE ml_prob IS NOT NULL AND outcome IS NOT NULL AND outcome != 'open' "
         "ORDER BY id"
     )

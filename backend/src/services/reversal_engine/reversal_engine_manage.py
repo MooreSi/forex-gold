@@ -143,7 +143,14 @@ class _ManagementMixin:
         signal, whose virtual management should itself vary by whichever
         STRATEGY_* is actually configured for the "Reversal Engine" channel
         (see _active_strategy) so the ML labels reflect what a real trade
-        under that setting would have done."""
+        under that setting would have done.
+
+        A `template:<name>` stamp runs on that template, ahead of the GD2
+        check: a real order from either source would (docs/todo/030)."""
+        if str(sig.get("strategy") or "").startswith("template:"):
+            from backend.src.services.reversal_engine import virtual_template_exit as _vte
+            if await _vte.manage(self, sig, tick):
+                return
         if sig.get("level_type") == "unicorn" or sig.get("source_channel") == _GD2_SOURCE_CHANNEL:
             await self._manage_gd2_signal(sig, tick)
         elif sig.get("strategy") == STRATEGY_CONSERVATIVE:

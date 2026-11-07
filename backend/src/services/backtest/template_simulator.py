@@ -82,9 +82,8 @@ _SUPPORTED_TRAIL_MODES = ("off", "", "step", "candle", "tp")
 # in docs/todo/backtest/010 rather than fixed here or silently inherited.
 _SUPPORTED_TICK_TRAIL_MODES = ("off", "", "step", "tp")
 
-# InpDefaultTrailStopPts (default 5.0): the EA's fallback when trail_distance
-# is 0, a raw price delta rather than pips. An EA input, so a chart can differ.
-_EA_DEFAULT_TRAIL_DISTANCE = 5.0
+# InpDefaultTrailStopPts, the EA's fallback when trail_distance is 0, lives in
+# template_tick_walk with the tick rules that use it.
 
 
 class UnsupportedTemplate(Exception):
@@ -456,149 +455,32 @@ def simulate_ticks(template: dict, ticks: list, entry: float, is_buy: bool,
     """
     _guard(template, tick_mode=True)
 
+    # The rules live in TickWalk, one tick at a time, so the Reversal
+    # virtual trades walk exactly what this walks (docs/todo/030).
+    from backend.src.services.backtest.template_tick_walk import TickWalk
+
     sign = 1.0 if is_buy else -1.0
-    sl_distance = pips_to_price(_f(template, "sl_pips", 0.0))
-    lot = _lot_for(template, sl_distance, balance)
-
-    stop: Optional[float] = (entry - sign * sl_distance) if sl_distance > 0 else None
-    ladder = _ladder(template, entry, sign)
-    triggered = [False] * len(ladder)
-    # `ladder` drops undefined levels; the EA's triggers index tp[] with its
-    # gaps intact, so a TP number has to be translated, not used as a position.
-    tp_numbers = [n for n in range(1, _MAX_TP_LEVELS + 1)
-                  if _f(template, f"tp{n}_pips", 0.0) > 0]
-
-    def _position_of(tp_number: int) -> Optional[int]:
-        return tp_numbers.index(tp_number) if tp_number in tp_numbers else None
-
-    tpsl_mode = str(template.get("tpsl_mode") or "on").strip().lower()
-    ladder_on = tpsl_mode != "off"
-    partials_on = bool(_f(template, "partials", 1))
-    close_full_on_last = bool(_f(template, "close_full_on_last", 0))
-    broker_holds_last_tp = tpsl_mode == "on" and close_full_on_last
-
-    be_position = _position_of(int(_f(template, "be_trigger", 0)))
-    be_mode = str(template.get("be_mode") or "entry").strip().lower()
-    be_buffer = _f(template, "be_buffer_pts", 0.0)
-    be_done = False
-
-    trail_mode = str(template.get("trail_mode") or "off").strip().lower()
-    trail_dist = pips_to_price(_f(template, "trail_distance", 0.0))
-    if trail_dist <= 0:
-        trail_dist = _EA_DEFAULT_TRAIL_DISTANCE
-    trail_pad = pips_to_price(_f(template, "trail_padding", 0.0))
-    trail_act = pips_to_price(_f(template, "trail_activation", 0.0))
-    trail_position = _position_of(int(_f(template, "tp1_trigger_level", 0)))
-    trail_step = pips_to_price(_f(template, "trail_step", 0.0))
-
-    min_dist = max(float(stops_level_points) * _POINT,
-                   pips_to_price(_f(template, "guard_pips", 0.0)),
-                   pips_to_price(_f(template, "safety_cap_pips", 0.0)))
-
+    lot = _lot_for(template, pips_to_price(_f(template, "sl_pips", 0.0)), balance)
+    walk = TickWalk(template, entry, is_buy, lot, stops_level_points)
     res = TemplateResult(lot_size=lot, entry=entry, remaining_lots=lot)
 
-    def _cleared(position: int, mark: float) -> bool:
-        return (mark - ladder[position][0]) * sign >= 0
-
-    def _move_sl(wanted: float, mark: float) -> bool:
-        """MoveSl. True when the stop actually moved, which is what the EA's
-        breakeven latches on."""
-        nonlocal stop
-        if min_dist > 0:
-            floor = mark - sign * min_dist
-            if (wanted - floor) * sign > 0:
-                wanted = floor
-        # POSITION_SL reads 0.0 with no stop. Kept literal: a SELL's `better`
-        # test can then never pass, so the EA never gives one a stop here.
-        current = stop if stop is not None else 0.0
-        if (wanted - current) * sign <= 0:
-            return False
-        # Only reachable with no floor at all. The broker refuses a stop on
-        # the far side of price, so PositionModify fails and nothing moves.
-        if (wanted - mark) * sign > 0:
-            return False
-        stop = wanted
-        return True
-
     for idx, t in enumerate(ticks):
-        mark = float(t["bid"]) if is_buy else float(t["ask"])
-
-        if stop is not None and ((mark <= stop) if is_buy else (mark >= stop)):
-            res.outcome = "sl"
-            res.close_price = stop
-            res.close_bar = idx
-            res.pnl_price += (stop - entry) * sign * res.remaining_lots
-            res.remaining_lots = 0.0
-            break
-
-        if ladder_on and res.remaining_lots > 0:
-            for i, (tp_price, pct) in enumerate(ladder):
-                if triggered[i]:
-                    continue
-                if not _cleared(i, mark):
-                    break
-                is_last = (i == len(ladder) - 1)
-                if is_last and (close_full_on_last or not partials_on):
-                    fill = tp_price if broker_holds_last_tp else mark
-                    res.pnl_price += (fill - entry) * sign * res.remaining_lots
-                    res.closed_lots.append(round(res.remaining_lots, 2))
-                    res.remaining_lots = 0.0
-                    triggered[i] = True
+        for ev in walk.step(float(t["bid"]), float(t["ask"])):
+            res.pnl_price += (ev.price - entry) * sign * ev.lots
+            if ev.kind == "sl":
+                res.outcome = "sl"
+            else:
+                res.closed_lots.append(ev.lots)
+                if ev.kind == "close":
                     res.outcome = "tp"
-                    res.close_price = fill
-                    res.close_bar = idx
-                    break
-                if not partials_on:
-                    break
-                lots = min(round(lot * pct, 2), res.remaining_lots)
-                if lots <= 0:
-                    continue
-                triggered[i] = True
-                res.pnl_price += (mark - entry) * sign * lots
-                res.closed_lots.append(lots)
-                res.remaining_lots = round(res.remaining_lots - lots, 2)
-                # A ladder whose levels sum to exactly 100% (the normal
-                # case) zeroes remaining_lots right here, through the
-                # ordinary partial-close path rather than the dedicated
-                # "close everything" branch above -- which is the only
-                # other place close_price/close_bar get set. Without this,
-                # every such trade reports outcome="tp" with close_price
-                # stuck at its 0.0 default.
-                if res.remaining_lots <= 0:
-                    res.close_price = mark
-                    res.close_bar = idx
-
-        if res.remaining_lots <= 0:
+            if ev.kind != "partial" or walk.remaining_lots <= 0:
+                res.close_price = ev.price
+                res.close_bar = idx
+        res.remaining_lots = walk.remaining_lots
+        if walk.done:
             if res.outcome == "timeout":
                 res.outcome = "tp"
             break
-
-        if not be_done and be_position is not None and (
-                triggered[be_position] or _cleared(be_position, mark)):
-            be_done = _move_sl(
-                entry + sign * be_buffer if be_mode == "entry_buffer" else entry,
-                mark)
-
-        trail_armed = True
-        if trail_act > 0:
-            trail_armed = (mark - entry) * sign >= trail_act
-            if not trail_armed and trail_position is not None:
-                trail_armed = triggered[trail_position]
-
-        if trail_armed:
-            if trail_mode == "step":
-                candidate = mark - sign * (trail_dist + trail_pad)
-                if (stop is None or trail_step <= 0
-                        or (candidate - stop) * sign >= trail_step):
-                    _move_sl(candidate, mark)
-            elif trail_mode == "tp":
-                best = None
-                for i, (tp_price, _pct) in enumerate(ladder):
-                    if not _cleared(i, mark):
-                        break
-                    best = tp_price
-                if best is not None:
-                    _move_sl(best, mark)
 
     if res.remaining_lots > 0 and res.outcome == "timeout" and ticks:
         last = ticks[-1]

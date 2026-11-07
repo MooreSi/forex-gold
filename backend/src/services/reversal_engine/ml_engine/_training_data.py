@@ -57,7 +57,10 @@ def _realised_r(row: dict) -> Optional[float]:
     if row.get("live_exec_status") == "executed":
         return None
     try:
-        risk = float(row.get("sl_dist") or 0.0) * _DOLLARS_PER_POINT
+        # A virtual trade run on its own template is stopped at the
+        # template's distance, not sl_dist (docs/todo/030).
+        risk_pts = row.get("virtual_risk_pts") or row.get("sl_dist") or 0.0
+        risk = float(risk_pts) * _DOLLARS_PER_POINT
         if risk <= 0 or not math.isfinite(risk):
             return None
         net = row.get("net_pnl_dollars")

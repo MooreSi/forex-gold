@@ -61,6 +61,53 @@ def test_an_unreachable_vps_is_a_503_not_this_nodes_idle_engine(make_client, vps
     assert "could not be reached" in res.json()["error"]["message"]
 
 
+@pytest.fixture
+def fits(monkeypatch):
+    """Background refits started on THIS node, recorded instead of run."""
+    from backend.src.api.routers import engines as engines_router
+    started: list[bool] = []
+    monkeypatch.setattr(engines_router.reversal_ctl, "pro_model_fit_in_background",
+                        lambda force=False: started.append(force))
+    monkeypatch.setattr(engines_router.reversal_ctl, "pro_model_status",
+                        lambda: {"n": 0, "reason": "not fitted"})
+    return started
+
+
+def test_retrain_refits_the_vps_model_the_panel_shows(make_client, vps, fits):
+    """Owner, 2026-11-08: in Remote mode the panel shows the VPS's pro model
+    (the report above), but Retrain refit the Mac's, so pressing it changed
+    nothing on screen."""
+    body = make_client().post("/api/engines/reversal/fit").json()
+
+    assert [n for n, _ in vps.asked] == ["pro_model_fit"]
+    assert fits == []
+    assert body["answered_by"] == "vps"
+
+
+def test_retrain_with_the_vps_unreachable_is_a_503_not_a_mac_refit(make_client, vps, fits):
+    vps.raises = ConnectionError("not connected")
+
+    res = make_client().post("/api/engines/reversal/fit")
+
+    assert res.status_code == 503
+    assert fits == []
+
+
+def test_the_vps_answers_a_retrain_with_a_background_refit(monkeypatch, fits):
+    """The VPS half: the name the Mac sends is registered, and running it starts
+    the background fit (never the blocking one, bugs/030)."""
+    import asyncio
+    from backend.src.api.routers import engines as engines_router
+    monkeypatch.setattr(pr, "REPORTS", dict(pr.REPORTS))
+    monkeypatch.setattr(pr, "_ARGS", dict(pr._ARGS))
+
+    engines_router.offer_panels_to_peer()
+    body = asyncio.run(pr.run_local("pro_model_fit", {}))
+
+    assert fits == [True]
+    assert body["started"] is True
+
+
 def test_the_reversal_report_carries_the_pro_model_of_the_node_that_built_it(
         make_client, monkeypatch):
     """The pro signal model's status was only on /state, which is always this

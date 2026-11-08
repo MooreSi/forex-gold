@@ -924,8 +924,15 @@ and `/api/brain` ask the right node over the peer-report channel
 * The reversal report now carries `pro_model`. `/state`'s is always this
   machine's; the report's is the model of the node that built it.
 
-Not routed yet: "Retrain in the background" and "Run the research study" still
-act on this machine's engine.
+"Retrain in the background" follows the engine node too since 2026-11-08
+(`pro_model_fit`, registered by `offer_panels_to_peer()`): before, it refit the
+Mac's model while the panel showed the VPS's, so it looked like it did nothing.
+An unreachable VPS is a 503, never a Mac refit; a VPS on older code answers
+"update the VPS". The pro model lives in memory only, so after a restart a node
+shows "not fitted" until a signal is scored, a pro signal is captured, a merge
+runs or Retrain is pressed (none of which happens while the market is shut).
+
+Not routed yet: "Run the research study" still acts on this machine's engine.
 
 ## Merging training data between the nodes (2026-10-22, docs/todo/026)
 

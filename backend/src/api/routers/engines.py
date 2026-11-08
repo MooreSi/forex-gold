@@ -167,6 +167,8 @@ def offer_panels_to_peer() -> None:
     """
     engines_ctl.register_panel_report("breakout_panel", breakout_report_local)
     engines_ctl.register_panel_report("reversal_panel", reversal_report_local)
+    # Not a read: it starts a refit of an in-memory model. Places nothing.
+    engines_ctl.register_panel_report("pro_model_fit", fit_pro_model_local)
 
 
 async def breakout_report_local() -> dict:
@@ -329,7 +331,15 @@ async def fit_pro_model() -> dict:
     `pro_model_fit_in_background` is the only version this layer may call, and
     `tests/reversal_engine/test_panel_fit_does_not_freeze_the_ui.py` asserts
     that no module under `backend/src/api/` names the blocking one.
+
+    On the node whose engines generate, like the report that shows the model:
+    in Remote mode it refits the VPS's, not this Mac's (owner, 2026-11-08).
     """
+    return await _from_engine_node("pro_model_fit", fit_pro_model_local)
+
+
+async def fit_pro_model_local() -> dict:
+    """Start this node's background refit. The VPS runs it when the Mac asks."""
     reversal_ctl.pro_model_fit_in_background(force=True)
     return {"started": True, "status": reversal_ctl.pro_model_status()}
 

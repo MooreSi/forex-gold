@@ -128,14 +128,20 @@ def r_full(row: dict) -> Optional[float]:
         return None
     if row.get("live_exec_status") == "executed":
         return None
-    sl = float(row.get("sl_dist") or 0.0)
+    sl = _risk_pts(row)
     if sl <= 0:
         return None
     return float(row["net"]) / (sl * _USD_PER_POINT)
 
 
+def _risk_pts(row: dict) -> float:
+    """The stop the virtual trade actually had: the template's when it ran on
+    one (docs/todo/030), else the signal's own. Same rule as the ML label."""
+    return float(row.get("virtual_risk_pts") or row.get("sl_dist") or 0.0)
+
+
 def _legacy_r(row: dict) -> Optional[float]:
-    sl = float(row.get("sl_dist") or 0.0)
+    sl = _risk_pts(row)
     if row.get("status") != "closed" or sl <= 0:
         return None
     return float(row.get("pnl_pts") or 0.0) / sl

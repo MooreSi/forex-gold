@@ -193,3 +193,43 @@ class TestTheReport:
     def test_a_variant_with_nothing_to_score_reports_none_not_zero(self, fresh_repo):
         assert all(r["mean_r_full"] is None and r["mean_net"] is None
                    for r in shadow.report())
+
+
+class TestRUsesTheStopTheTradeActuallyHad:
+    """docs/todo/030: a virtual signal stamped with a template runs on the
+    template's stop (`virtual_risk_pts`), not the signal's own (`sl_dist`).
+    Owner, 2026-11-09: two -$51 template losses on the same 5pt stop showed as
+    -0.72R and -1.3R because each was divided by its signal's stop."""
+
+    def _template_loss(self, ref="RE-t", net=-50.0, pnl_pts=-5.0,
+                       sl_dist=7.0, risk=5.0):
+        repo.get_db().run(
+            "INSERT INTO re_signals (created_at, signal_ref, direction, sl_dist, "
+            " status, outcome, pnl_pts, net_pnl_dollars, virtual_risk_pts) "
+            "VALUES (1000.0,?,?,?,?,?,?,?,?)",
+            ref, "BUY", sl_dist, "closed", "loss", pnl_pts, net, risk)
+        shadow.record_all(ref, ctx())
+
+    def test_the_ledger_row(self, fresh_repo):
+        self._template_loss()
+        (row,) = shadow.ledger(20)
+        assert row["r_full"] == pytest.approx(-1.0)
+        assert row["r"] == pytest.approx(-1.0)
+
+    def test_the_history_row(self, fresh_repo):
+        self._template_loss()
+        row = next(r for r in shadow.history(50) if r["signal_ref"] == "RE-t")
+        assert row["r_full"] == pytest.approx(-1.0)
+        assert row["r"] == pytest.approx(-1.0)
+
+    def test_the_variant_scoreboard(self, fresh_repo):
+        self._template_loss()
+        champ = next(r for r in shadow.report() if r["is_champion"])
+        assert champ["mean_r_full"] == pytest.approx(-1.0)
+        assert champ["mean_r"] == pytest.approx(-1.0)
+
+    def test_a_ladder_row_still_uses_its_own_stop(self, fresh_repo):
+        self._template_loss(risk=None, net=-35.0, pnl_pts=-3.5)
+        (row,) = shadow.ledger(20)
+        assert row["r_full"] == pytest.approx(-35.0 / 70.0)
+        assert row["r"] == pytest.approx(-3.5 / 7.0)

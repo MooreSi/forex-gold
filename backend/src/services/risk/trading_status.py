@@ -22,8 +22,16 @@ three is a true statement that would be misleading on its own:
                       Added 2026-10-08: London and New York switched off
                       during the overlap left the badge reading "Trading
                       Active" while `is_session_allowed` refused every entry.
-4. `news_blackout` -- entries held for a news window, which lifts itself.
-5. `ok`            -- nothing is holding anything.
+4. `daily_loss`    -- `daily_limit_counts_open_risk` is refusing orders:
+                      today's closed loss plus open risk leaves less room
+                      than the last refused order needed (`open_risk_hold`).
+                      Lifts itself at the day's end or when a close frees the
+                      room. Below a closed session (nothing would trade anyway),
+                      above a blackout (that lifts in minutes). Added
+                      2026-11-11: the VPS read "Trading Active" while 17
+                      orders were refused.
+5. `news_blackout` -- entries held for a news window, which lifts itself.
+6. `ok`            -- nothing is holding anything.
 
 `ok` is reachable only when none of the others apply. A badge saying so while
 every entry is being held is a false all-clear, which is the complaint that put
@@ -122,6 +130,11 @@ def _session_closed(name: str) -> dict:
             "until": None, "resume_ts": None,
             # resume_all clears none of the toggles.
             "can_resume": False}
+
+
+def _daily_loss_hold() -> dict | None:
+    from backend.src.services.risk.open_risk_hold import state
+    return state()
 
 
 def _news_state() -> dict:
@@ -326,6 +339,19 @@ def badge() -> dict:
     allowed, session = _safe(_session_state, (True, ""))
     if not allowed:
         return _session_closed(session)
+
+    hold = _safe(_daily_loss_hold, None)
+    if hold:
+        from backend.src.services.risk.open_risk_hold import describe
+        return {
+            "state": "daily_loss",
+            "label": "Daily Loss Limit: Entries Blocked",
+            "detail": describe(hold),
+            "until": None, "resume_ts": None,
+            # A Resume clears none of it: it lifts when the day ends or a
+            # close frees the room.
+            "can_resume": False,
+        }
 
     news = _safe(_news_state, {"paused": False})
     if news.get("paused"):

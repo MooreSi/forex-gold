@@ -145,10 +145,21 @@ async def _open_risk_reason(bridge, direction, stop_loss, lot_size, strategy, ti
     worst = realised - open_risk - new_risk
     if worst > -abs(limit):
         return None
+    _remember_for_the_badge(day_base, new_risk)
     return (f"Open risk counts toward the daily loss limit: ${realised:.2f} closed today, "
             f"${open_risk:.2f} at risk in open trades and ${new_risk:.2f} on this order "
             f"would reach ${worst:.2f} against -${abs(limit):.2f} "
             f"({max_daily:.1f}% of ${day_base:,.2f}). Order refused.")
+
+
+def _remember_for_the_badge(day_base: float, new_risk: float) -> None:
+    """Display only (`open_risk_hold`): the refusal has already been decided
+    and must stand whatever happens here."""
+    try:
+        from backend.src.services.risk import open_risk_hold
+        open_risk_hold.remember(day_base=day_base, new_risk=new_risk)
+    except Exception as exc:
+        log.warning("[RiskGuard] could not record the refusal for the badge: %s", exc)
 
 
 async def _live_balance(bridge: Any) -> Optional[float]:

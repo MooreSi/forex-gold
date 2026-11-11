@@ -609,3 +609,20 @@ moves anything.
 
 Pinned by `tests/risk/test_position_guards.py` (including the 2026-10-22
 sequence) and `RiskSection.test.tsx`. **Not yet through a demo session.**
+
+- **The badge reports the open-risk hold (2026-11-11, owner: "its still saying
+  VPS: Trading Active when its actually blocked").** The guard refuses orders
+  long before the closed-only halt fires. On 11 Nov the VPS closed -$31.29
+  against -$39.29, and 17 Reversal orders risking $11-15 were refused while
+  nothing was paused and the badge read "Trading Active". The badge cannot know
+  the next order's risk, so the guard records the one it refused
+  (`open_risk_hold.remember`, `app_config` key `open_risk_refusal`) and the
+  badge re-asks the guard's question about that order with today's numbers:
+  state `daily_loss`, "Daily Loss Limit: Entries Blocked", below a closed
+  session and above a news blackout. It lifts by itself at the trading day's
+  end, when a close frees enough room, or when the switch or the limit
+  changes. The record is written after the refusal is decided and inside a
+  try/except, so it never changes the refusal. An order smaller than the room
+  left still goes through while the badge shows the hold; the detail names the
+  room in dollars. A VPS shows it only after it runs this code and has
+  refused an order. Pinned by `tests/risk/test_badge_reports_daily_loss_hold.py`.

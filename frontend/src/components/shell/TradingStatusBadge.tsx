@@ -25,6 +25,7 @@ const LOOK: Record<string, { Icon: typeof Shield; className: string }> = {
   ok: { Icon: Shield, className: "text-profit" },
   halted: { Icon: Ban, className: "text-loss" },
   profit_target: { Icon: Trophy, className: "text-accent" },
+  daily_loss: { Icon: Ban, className: "text-loss" },
   news_blackout: { Icon: Newspaper, className: "text-warning" },
   session_closed: { Icon: Clock, className: "text-warning" },
   unknown: { Icon: HelpCircle, className: "text-ink-3" },

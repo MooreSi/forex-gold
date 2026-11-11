@@ -77,6 +77,20 @@ describe("TradingStatusBadge", () => {
     expect(screen.getByTestId("trading-status-badge")).toHaveClass("text-warning");
   });
 
+  it("shows the open-risk daily loss hold as a loss guard, not as an unknown", async () => {
+    // 2026-11-11: the VPS read "Trading Active" while the daily loss limit
+    // refused 17 orders. The backend now reports it; grey would hide it.
+    mockBadge({
+      state: "daily_loss", label: "VPS: Daily Loss Limit: Entries Blocked",
+      detail: "Orders that risk more than $8.00 are refused.",
+      until: null, resume_ts: null, can_resume: false,
+    });
+    render(<TradingStatusBadge />);
+    await screen.findByText("VPS: Daily Loss Limit: Entries Blocked");
+
+    expect(screen.getByTestId("trading-status-badge")).toHaveClass("text-loss");
+  });
+
   it("offers a Resume when one would do something", async () => {
     mockBadge(HALTED);
     render(<TradingStatusBadge />);

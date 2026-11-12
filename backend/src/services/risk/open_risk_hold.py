@@ -14,9 +14,17 @@ order with today's numbers. It answers None, which is not holding anything, as s
 the trading day ends, a close frees enough room, or the switch or the limit
 changes. The record is kept in `app_config` so a restart does not lose it.
 
-Display only. Nothing here decides whether an order is placed: the guard's
-refusal does not depend on this module, and a failure here never changes it
+The record is display only: a failure writing it never changes a refusal
 (`position_guards._open_risk_reason`).
+
+**Resume waives the check for the rest of the trading day** (owner,
+2026-11-12: "i should be able to click this to resume trading from a popup
+like the others"). `trading_status.resume_all` calls `waive_today` only while
+the hold is showing, so a Resume pressed for a breaker never switches this
+guard off. The waiver names the day it was given on and lapses when that day
+ends; `position_guards.check` skips the open-risk sum while it holds. The
+closed-loss halt (`governor.apply_daily_loss_halt_on_close`) is a different
+mechanism and the waiver does not touch it.
 """
 from __future__ import annotations
 
@@ -29,6 +37,33 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 CONFIG_KEY = "open_risk_refusal"
+WAIVER_KEY = "open_risk_waived"
+
+
+def waive_today() -> None:
+    """Resume pressed over the hold: let orders past the open-risk sum until
+    the trading day ends."""
+    from backend.src.services.risk import governor
+    from backend.src.services.risk.app_config_repo import set_app_config
+    set_app_config(WAIVER_KEY, json.dumps({
+        "day_start": governor.calendar_day_start_ts(), "ts": time.time()}))
+    log.warning("[RiskGuard] open-risk daily loss check waived by Resume until the day ends")
+
+
+def waived_today() -> bool:
+    """True while a Resume given this trading day stands. Unreadable is
+    not waived: the guard then refuses as it would without one."""
+    from backend.src.services.risk import governor
+    from backend.src.services.risk.app_config_repo import get_app_config
+    try:
+        raw = get_app_config(WAIVER_KEY)
+        if not raw:
+            return False
+        day = float(json.loads(raw)["day_start"])
+    except Exception as exc:
+        log.warning("[RiskGuard] open-risk waiver unreadable, not applied: %s", exc)
+        return False
+    return abs(day - governor.calendar_day_start_ts()) <= 1.0
 
 
 def remember(*, day_base: float, new_risk: float) -> None:
@@ -52,7 +87,7 @@ def state() -> Optional[dict]:
     from backend.src.services.risk.risk_settings_repo import get_risk_settings
 
     raw = get_app_config(CONFIG_KEY)
-    if not raw:
+    if not raw or waived_today():
         return None
     rec = json.loads(raw)
     if abs(float(rec["day_start"]) - governor.calendar_day_start_ts()) > 1.0:
@@ -86,4 +121,5 @@ def describe(hold: dict) -> str:
             f"in open trades, against the -${hold['limit']:.2f} daily loss limit "
             f"({hold['pct']:.1f}% of ${hold['day_base']:,.2f}). The last refused order "
             f"risked ${hold['new_risk']:.2f} at {when}. This lifts when the trading "
-            f"day ends, or when a close frees enough room.")
+            f"day ends, or when a close frees enough room. Resume lets orders "
+            f"past this check until the day ends.")

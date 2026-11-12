@@ -626,3 +626,14 @@ sequence) and `RiskSection.test.tsx`. **Not yet through a demo session.**
   left still goes through while the badge shows the hold; the detail names the
   room in dollars. A VPS shows it only after it runs this code and has
   refused an order. Pinned by `tests/risk/test_badge_reports_daily_loss_hold.py`.
+- **Resume over that hold waives the open-risk check for the rest of the
+  trading day (2026-11-12, owner: "i should be able to click this to resume
+  trading from a popup like the others").** `resume_all` calls
+  `open_risk_hold.waive_today` only while the hold is showing, so a Resume
+  pressed for a breaker or a pause never switches the guard off. The waiver
+  (`app_config` key `open_risk_waived`) stores the trading day it was given
+  on and lapses when that day ends; an unreadable waiver counts as none.
+  `position_guards.check` skips the open-risk sum while it holds; never add
+  to a loser and the closed-loss halt are separate and untouched. On a paired
+  Mac the Resume goes to the VPS through the existing remote resume. Pinned by
+  `TestResumeWaivesItForTheRestOfTheDay` in the same test file.

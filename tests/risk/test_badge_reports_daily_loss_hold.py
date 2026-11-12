@@ -114,7 +114,6 @@ class TestTheBadgeReportsTheHold:
 
         assert out["state"] == "daily_loss"
         assert out["label"] == "Daily Loss Limit: Entries Blocked"
-        assert out["can_resume"] is False
 
     def test_the_detail_names_the_room_left_and_the_refused_order(self, morning):
         _refuse_one()
@@ -210,4 +209,59 @@ def test_on_a_paired_mac_the_vps_hold_is_labelled_as_the_vps(monkeypatch):
 
     assert out["state"] == "daily_loss"
     assert out["label"] == "VPS: Daily Loss Limit: Entries Blocked"
-    assert out["can_resume_on_vps"] is False
+
+
+class TestResumeWaivesItForTheRestOfTheDay:
+    """Owner, 2026-11-12: "i should be able to click this to resume trading
+    from a popup like the others". Resume waives the open-risk check until
+    the trading day ends. The closed-loss halt is a separate mechanism and is
+    not touched."""
+
+    def test_the_hold_offers_a_resume(self, morning):
+        _refuse_one()
+
+        assert ts.badge()["can_resume"] is True
+
+    def test_resume_clears_the_hold_and_says_so(self, morning):
+        _refuse_one()
+
+        out = ts.resume_all()
+
+        assert "daily_loss_limit" in out["cleared"]
+        assert out["status"]["state"] == "ok"
+
+    def test_after_resume_the_guard_allows_the_order_it_refused(self, morning):
+        _refuse_one()
+        ts.resume_all()
+        bridge = _Bridge(_tick())
+        tick = bridge._tick
+
+        asyncio.run(pg.check(bridge, signal_id="new", direction="BUY",
+                             stop_loss=tick.ask - 5.0, lot_size=LOT,
+                             strategy="scalp", tick=tick, rs=db.get_risk_settings()))
+
+    def test_the_waiver_ends_with_the_trading_day(self, morning):
+        _refuse_one()
+        ts.resume_all()
+        rec = json.loads(db.get_app_config(open_risk_hold.WAIVER_KEY))
+        rec["day_start"] -= 86400.0
+        db.set_app_config(open_risk_hold.WAIVER_KEY, json.dumps(rec))
+
+        _refuse_one()
+        assert ts.badge()["state"] == "daily_loss"
+
+    def test_a_resume_with_no_hold_showing_waives_nothing(self, morning):
+        """A Resume pressed for a breaker must not quietly switch this
+        guard off for the day."""
+        out = ts.resume_all()
+
+        assert "daily_loss_limit" not in out["cleared"]
+        _refuse_one()
+
+    def test_the_vps_hold_offers_its_resume_on_a_paired_mac(self):
+        remote = {"state": "daily_loss", "label": "Daily Loss Limit: Entries Blocked",
+                  "detail": "x", "until": None, "resume_ts": None, "can_resume": True}
+
+        out = ts._as_the_vps_reports_it({"connected": True, "badge": remote})
+
+        assert out["can_resume_on_vps"] is True

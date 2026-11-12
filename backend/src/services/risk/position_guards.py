@@ -38,7 +38,8 @@ async def check(bridge: Any, *, signal_id: str, direction: str, stop_loss: float
                 lot_size: float, strategy: str, tick: Any, rs: dict) -> None:
     """Raise ValueError naming the rule when the order must not be placed."""
     add_on = bool(rs.get("never_add_to_loser_enabled", 0))
-    risk_on = bool(rs.get("daily_limit_counts_open_risk", 0))
+    risk_on = (bool(rs.get("daily_limit_counts_open_risk", 0))
+               and not _waived_by_resume())
     if not (add_on or risk_on):
         return
     positions = [p for p in risk_repo.open_positions_for_guards()
@@ -150,6 +151,12 @@ async def _open_risk_reason(bridge, direction, stop_loss, lot_size, strategy, ti
             f"${open_risk:.2f} at risk in open trades and ${new_risk:.2f} on this order "
             f"would reach ${worst:.2f} against -${abs(limit):.2f} "
             f"({max_daily:.1f}% of ${day_base:,.2f}). Order refused.")
+
+
+def _waived_by_resume() -> bool:
+    """A Resume pressed over the badge's hold today (`open_risk_hold`)."""
+    from backend.src.services.risk import open_risk_hold
+    return open_risk_hold.waived_today()
 
 
 def _remember_for_the_badge(day_base: float, new_risk: float) -> None:

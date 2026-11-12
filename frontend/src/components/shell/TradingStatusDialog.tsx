@@ -27,6 +27,12 @@ export interface TradingStatus {
   can_resume_past_goal_on_vps?: boolean;
 }
 
+/** What Resume does over the open-risk daily loss hold (owner, 2026-11-12). */
+const DAILY_LOSS_RESUME =
+  "Resuming waives the open-risk daily loss check until the trading day ends, " +
+  "so orders are no longer refused for the risk in open trades. The daily " +
+  "loss halt on closed trades still applies.";
+
 /** The override's wording. Spelled out so it is never mistaken for Resume. */
 const RESUME_ANYWAY = "Resume anyway (ignore today's goal)";
 
@@ -108,6 +114,9 @@ export function TradingStatusDialog({
         <div data-testid="trading-status-dialog" className="space-y-3 text-xs text-ink-2">
           <p className="font-semibold text-ink-1">{status.label}</p>
           {status.detail && <p>{status.detail}</p>}
+          {status.state === "daily_loss" && status.can_resume_on_vps && (
+            <p className="text-ink-3">{DAILY_LOSS_RESUME}</p>
+          )}
           <p data-testid="trading-status-vps-note" className="text-ink-3">
             {status.can_resume_on_vps
               ? "The VPS is the active trader, so this is its status. Resume " +
@@ -189,7 +198,9 @@ export function TradingStatusDialog({
         <p className="font-semibold text-ink-1">{status.label}</p>
         {status.detail && <p>{status.detail}</p>}
 
-        {status.can_resume ? (
+        {status.can_resume && status.state === "daily_loss" ? (
+          <p className="text-ink-3">{DAILY_LOSS_RESUME}</p>
+        ) : status.can_resume ? (
           <p className="text-ink-3">
             Resuming lifts whatever is holding entries — a manual pause, a
             tripped circuit breaker, or today's profit target — and restarts

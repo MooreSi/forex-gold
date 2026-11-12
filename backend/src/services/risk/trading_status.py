@@ -26,7 +26,7 @@ three is a true statement that would be misleading on its own:
                       today's closed loss plus open risk leaves less room
                       than the last refused order needed (`open_risk_hold`).
                       Lifts itself at the day's end or when a close frees the
-                      room. Below a closed session (nothing would trade anyway),
+                      room; Resume waives it until the day ends. Below a closed session (nothing would trade anyway),
                       above a blackout (that lifts in minutes). Added
                       2026-11-11: the VPS read "Trading Active" while 17
                       orders were refused.
@@ -348,9 +348,9 @@ def badge() -> dict:
             "label": "Daily Loss Limit: Entries Blocked",
             "detail": describe(hold),
             "until": None, "resume_ts": None,
-            # A Resume clears none of it: it lifts when the day ends or a
-            # close frees the room.
-            "can_resume": False,
+            # Resume waives the open-risk check until the day ends (owner,
+            # 2026-11-12, `open_risk_hold.waive_today`).
+            "can_resume": True,
         }
 
     news = _safe(_news_state, {"paused": False})
@@ -407,7 +407,7 @@ def resume_all_past_goal() -> dict:
 
 
 def resume_all(past_goal: bool = False) -> dict:
-    """Clear whichever of the three holds is actually in force.
+    """Clear whichever of the four holds is actually in force.
 
     Mirrors the NiceGUI Resume dialog, and mirrors it deliberately: the badge
     can be reporting any of three different mechanisms, and a Resume that only
@@ -459,6 +459,16 @@ def resume_all(past_goal: bool = False) -> dict:
             cleared.append("daily_profit_target")
     except Exception as exc:
         log.warning("[TradingStatus] could not lift the daily target: %s", exc)
+
+    try:
+        # Only while the hold is showing, so a Resume pressed for anything
+        # else never switches the open-risk check off for the day.
+        if _daily_loss_hold():
+            from backend.src.services.risk.open_risk_hold import waive_today
+            waive_today()
+            cleared.append("daily_loss_limit")
+    except Exception as exc:
+        log.warning("[TradingStatus] could not waive the open-risk daily limit: %s", exc)
 
     out = {"cleared": cleared, "status": badge()}
     if kept:

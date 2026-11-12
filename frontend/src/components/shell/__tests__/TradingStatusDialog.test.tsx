@@ -54,6 +54,26 @@ const show = (status: TradingStatus, onChanged = () => {}) =>
     />,
   );
 
+const DAILY_LOSS: TradingStatus = {
+  state: "daily_loss", label: "Daily Loss Limit: Entries Blocked",
+  detail: "Orders that risk more than $8.00 are refused.",
+  until: null, resume_ts: null, can_resume: true,
+};
+
+describe("when the open-risk daily loss limit is refusing orders", () => {
+  // Owner, 2026-11-12: "i should be able to click this to resume trading
+  // from a popup like the others".
+  it("offers Resume and says it lasts until the day ends", async () => {
+    show(DAILY_LOSS);
+
+    expect(screen.getByText("Resume Trading")).toBeInTheDocument();
+    expect(screen.getByText(/open-risk daily loss check until the trading day ends/))
+      .toBeInTheDocument();
+    await userEvent.click(screen.getByText("Resume Trading"));
+    await waitFor(() => expect(posts.map(([u]) => u)).toContain("/api/trading/resume-all"));
+  });
+});
+
 describe("when a hold is in force", () => {
   it("offers to resume, and says what the state actually is", async () => {
     show(PROFIT_TARGET);

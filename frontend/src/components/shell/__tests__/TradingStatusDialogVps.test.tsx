@@ -73,3 +73,21 @@ it("still offers no Pause for the VPS", () => {
 
   expect(screen.queryByRole("button", { name: /pause now/i })).toBeNull();
 });
+
+/** Owner, 2026-11-12: the VPS's open-risk daily loss hold resumes from here. */
+it("offers Resume over the VPS's daily loss hold and says what it waives", async () => {
+  const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ cleared: ["daily_loss_limit"] }) }));
+  vi.stubGlobal("fetch", fetchMock);
+  show({
+    state: "daily_loss", label: "VPS: Daily Loss Limit: Entries Blocked",
+    detail: "Orders that risk more than $8.00 are refused.",
+    until: null, resume_ts: null, can_resume: false, node: "vps", can_resume_on_vps: true,
+  });
+
+  expect(screen.getByText(/open-risk daily loss check until the trading day ends/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /resume trading/i }));
+
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.map((c) => String((c as unknown[])[0])))
+      .toContain("/api/trading/remote/resume-all"));
+});

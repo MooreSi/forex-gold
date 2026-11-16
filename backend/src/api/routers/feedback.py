@@ -32,3 +32,16 @@ async def send(body: FeedbackWrite) -> FeedbackSent:
     except ValueError as exc:
         raise Refusal(str(exc), status_code=400) from exc
     return FeedbackSent(ok=True, id=entry["id"])
+
+
+class Ok(BaseModel):
+    ok: bool
+
+
+@router.post("/notices/{entry_id}/seen", response_model=Ok)
+async def seen(entry_id: str) -> Ok:
+    """The sender closed "Feedback noted and completed". The notices themselves
+    ride the header poll (`/api/system/header`, `feedback_done`)."""
+    if not feedback_ctl.mark_seen(entry_id):
+        raise Refusal("No such notice.", status_code=404)
+    return Ok(ok=True)

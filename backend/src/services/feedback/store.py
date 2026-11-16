@@ -43,3 +43,10 @@ def set_completed(entry_id: str, completed: bool) -> bool:
                 _jsonfile.write(_PATH, rows)
                 return True
         return False
+
+
+def completed_ids(ids) -> list[str]:
+    """Which of `ids` are currently Completed. Unknown ids are left out."""
+    wanted = {str(i) for i in ids}
+    return [str(r["id"]) for r in _jsonfile.read(_PATH)
+            if r.get("id") in wanted and r.get("status") == "completed"]

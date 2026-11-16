@@ -3,14 +3,20 @@
 `submit` runs on any install: it validates, then either records the entry
 directly (the issuer's own machine) or queues it for the remote connection to
 deliver. `receive` runs on the issuer: store first, announce only if new.
+
+Either way the id goes on this install's sent list, so the sender can be told
+when the owner marks it Completed (`completed_notices`).
 """
 from __future__ import annotations
 
 import asyncio
 import time
+import logging
 import uuid
 
-from backend.src.services.feedback import notify, outbox, store
+from backend.src.services.feedback import notify, outbox, sent, store
+
+log = logging.getLogger(__name__)
 
 KINDS = ("feature", "bug", "feedback")
 MAX_MESSAGE = 4000
@@ -55,6 +61,7 @@ def submit(kind: str, message: str, *, issuer: bool | None = None) -> dict:
     """Validate and hand off. Raises ValueError for input the user can fix."""
     entry = clean({"id": uuid.uuid4().hex, "kind": kind, "message": message,
                    **_identity()})
+    sent.add(entry)
     if _is_issuer() if issuer is None else issuer:
         task = asyncio.ensure_future(receive(entry))
         _background.add(task)
@@ -70,3 +77,27 @@ async def receive(entry: dict) -> bool:
         return False
     await notify.announce(entry)
     return True
+
+
+def completed_notices(*, issuer: bool | None = None) -> list[dict]:
+    """This install's feedback the owner has marked Completed and the sender
+    has not yet seen. Read on every header poll, so it never raises.
+
+    The issuer's own feedback never crosses the wire, so on the issuer the
+    awaiting ids are checked against its own store here instead.
+    """
+    try:
+        if _is_issuer() if issuer is None else issuer:
+            sent.mark_completed(store.completed_ids(sent.awaiting_ids()))
+        return [{"id": r["id"], "kind": r.get("kind", "feedback"),
+                 "message": r.get("message", ""),
+                 "completed_at": r.get("completed_at", 0)}
+                for r in sent.notices()]
+    except Exception as exc:                      # noqa: BLE001
+        log.warning("[Feedback] Could not read completed notices: %s", exc)
+        return []
+
+
+def mark_seen(entry_id: str) -> bool:
+    """The sender closed the popup. False when there is no such notice."""
+    return sent.mark_seen(entry_id)

@@ -743,6 +743,28 @@ The path, and why each step is there:
   configured the Telegram alert and the console entry still happen and the
   log says the email was not sent.
 
+**Telling the sender it is done (2026-11-16).** Marking an entry Completed
+shows the sender a "Feedback noted and completed" popup. It is a pull, not a
+push, because the server has no way to address "whoever sent entry X":
+
+- `submit` also records the id on this install's sent list
+  (`remote/feedback_sent.json`, `feedback/sent.py`), issuer included.
+- On each server ping `_feedback.flush` sends `MSG_FEEDBACK_ASK` with the
+  awaiting ids; the server answers `MSG_FEEDBACK_DONE` with the ones its store
+  has as `completed` right now. Ids are random uuid4s, so an install can only
+  learn about its own feedback. Completed then reopened before the next ping
+  is never reported.
+- The issuer's own feedback never crosses the wire, so `completed_notices`
+  checks its awaiting ids against the local store instead.
+- The notices ride `/api/system/header` as `feedback_done` (no new poll);
+  Close posts `/api/feedback/notices/{id}/seen`, which drops the row, so it
+  shows once. A later reopen-and-complete does not show it again.
+- Hooks in `client.py` and `server.py` stayed one line each (`CLIENT_TYPES`,
+  `SERVER_TYPES`): both files are LOC-baselined.
+- Tests that call `service.submit` must redirect `sent._PATH` too, or they
+  write the real data directory. `tests/feedback/conftest.py` does it for that
+  folder; anything else calling `submit` needs the same.
+
 ## Reversal has two names, and the wire keeps the old one (2026-09-28)
 
 The engine registry (`services/engines/registry.py`) and the Signal Generator

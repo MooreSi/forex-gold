@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 from backend.src.api.deps import engine as engine_dep
 from backend.src.api.schemas.system import ReleasesOut
 from backend.src.controllers import broker_controller as broker_ctl
+from backend.src.controllers import feedback_controller as feedback_ctl
 from backend.src.controllers import goal_controller as goal_ctl
 from backend.src.controllers import history_controller as history_ctl
 from backend.src.controllers import settings_controller as settings_ctl
@@ -102,4 +103,7 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
             "commits": len(update_check.get("commits") or []),
             "remote_sha": str(update_check.get("remote_sha") or ""),
         },
+        # Feedback the owner has marked Completed: the "Feedback noted and
+        # completed" popup. Two small file reads, and never raises.
+        "feedback_done": feedback_ctl.completed_notices(),
     }

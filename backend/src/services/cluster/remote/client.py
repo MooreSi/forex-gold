@@ -672,8 +672,8 @@ async def _connect_loop() -> None:
                         await ws.send(json.dumps(make(MSG_PONG)))
                         await _feedback.flush(ws)   # queued feedback goes out on the next ping
 
-                    elif t == _feedback.MSG_FEEDBACK_ACK:
-                        _feedback.on_ack(m)
+                    elif t in _feedback.CLIENT_TYPES:
+                        _feedback.on_message(m)
 
                     elif t == MSG_GET_DIAG:
                         await ws.send(json.dumps(_build_diagnostics()))

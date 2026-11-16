@@ -1034,7 +1034,7 @@ async def _handler(websocket) -> None:
             elif t == MSG_DIAGNOSTICS:
                 if conn_entry:
                     conn_entry["diagnostics"] = m.get("data", {})
-            elif t == _feedback.MSG_FEEDBACK:
+            elif t in _feedback.SERVER_TYPES:
                 await _feedback.handle(websocket, tok_meta, hostname, ip, m)
 
             elif t == MSG_UPDATE_STATUS:

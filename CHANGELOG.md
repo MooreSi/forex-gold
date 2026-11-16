@@ -258,6 +258,12 @@ record. 57 commits since v0.611, plus this release's own change.
   email and adds the entry to the admin console's new Feedback tab, where it
   can be marked Completed. An install that cannot reach the admin server
   queues the feedback and sends it on the next connection.
+- **Feedback noted and completed.** Marking an entry Completed in the admin
+  console now tells the sender: their dashboard shows a "Feedback noted and
+  completed" popup naming which piece of feedback it was, once, until Close.
+  Each install keeps the ids it sent (`remote/feedback_sent.json`) and asks
+  about them on each server ping (`MSG_FEEDBACK_ASK` / `MSG_FEEDBACK_DONE`);
+  the notices ride the header poll as `feedback_done`. No forex-admin change.
 
 ## v0.611 — Windows install and VPS setup (2026-09-25)
 

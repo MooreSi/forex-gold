@@ -1,11 +1,15 @@
 import { MessageSquarePlus } from "lucide-react";
 import { useState } from "react";
+import { FeedbackCompletedNotice } from "./FeedbackCompletedNotice";
 import { FeedbackDialog } from "./FeedbackDialog";
 
 /**
  * The "Feedback" button at the end of the tab strip, straight after About.
  * A button, not a tab: it opens a popup over whatever you are looking at
  * rather than replacing it.
+ *
+ * It also hosts the "Feedback noted and completed" popup, because this button
+ * is on screen on every tab.
  */
 export function FeedbackButton() {
   const [open, setOpen] = useState(false);
@@ -20,6 +24,7 @@ export function FeedbackButton() {
         Feedback
       </button>
       <FeedbackDialog open={open} onOpenChange={setOpen} />
+      <FeedbackCompletedNotice />
     </>
   );
 }

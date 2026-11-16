@@ -120,6 +120,20 @@ export interface HeaderState {
    * update actually contains is fetched once, when the popup opens.
    */
   update?: { available: boolean; commits: number; remote_sha: string } | null;
+  /**
+   * Feedback this install sent that the owner has marked Completed and the
+   * sender has not yet closed the popup for. Oldest completion first.
+   */
+  feedback_done?: FeedbackDone[];
+}
+
+/** One "Feedback noted and completed" notice. `message` is an excerpt. */
+export interface FeedbackDone {
+  id: string;
+  kind: string;
+  message: string;
+  /** Unix seconds. */
+  completed_at: number;
 }
 
 /** One commit in a pending update, as `/api/node/update` reports it. */

@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from backend.src.services.feedback import service as _service
 
-__all__ = ["submit", "completed_notices", "mark_seen", "MAX_MESSAGE"]
+__all__ = ["submit", "completed_notices", "mark_seen", "unread_count",
+           "unread_feedback", "mark_read", "MAX_MESSAGE"]
 
 MAX_MESSAGE = _service.MAX_MESSAGE
 
@@ -24,3 +25,18 @@ def completed_notices() -> list[dict]:
 def mark_seen(entry_id: str) -> bool:
     """The sender closed the popup. False when there is no such notice."""
     return _service.mark_seen(entry_id)
+
+
+def unread_count() -> int:
+    """New feedback for the admin node's title-bar alert; 0 elsewhere."""
+    return _service.unread_count()
+
+
+def unread_feedback() -> list[dict]:
+    """The entries behind that alert, newest first."""
+    return _service.unread_feedback()
+
+
+def mark_read(ids: list[str]) -> int:
+    """The owner opened the alert: these ids are read."""
+    return _service.mark_read(ids)

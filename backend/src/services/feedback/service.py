@@ -101,3 +101,34 @@ def completed_notices(*, issuer: bool | None = None) -> list[dict]:
 def mark_seen(entry_id: str) -> bool:
     """The sender closed the popup. False when there is no such notice."""
     return sent.mark_seen(entry_id)
+
+
+_INBOX_FIELDS = ("id", "kind", "message", "name", "email", "hostname",
+                 "version", "submitted_at")
+
+
+def unread_count(*, issuer: bool | None = None) -> int:
+    """New feedback for the admin node's title-bar alert. 0 on any other
+    install. Read on every header poll, so it never raises."""
+    try:
+        if not (_is_issuer() if issuer is None else issuer):
+            return 0
+        return len(store.unread())
+    except Exception as exc:                      # noqa: BLE001
+        log.warning("[Feedback] Could not count unread feedback: %s", exc)
+        return 0
+
+
+def unread_feedback(*, issuer: bool | None = None) -> list[dict]:
+    """The entries behind the alert, newest first. Empty off the issuer."""
+    if not (_is_issuer() if issuer is None else issuer):
+        return []
+    return [{k: r.get(k) for k in _INBOX_FIELDS} for r in store.unread()]
+
+
+def mark_read(ids, *, issuer: bool | None = None) -> int:
+    """The owner opened the alert. Only the ids shown, so feedback that
+    arrived meanwhile keeps the alert lit. Does not complete anything."""
+    if not (_is_issuer() if issuer is None else issuer):
+        return 0
+    return store.mark_read(ids)

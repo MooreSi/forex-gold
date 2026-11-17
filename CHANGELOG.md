@@ -264,6 +264,12 @@ record. 57 commits since v0.611, plus this release's own change.
   Each install keeps the ids it sent (`remote/feedback_sent.json`) and asks
   about them on each server ping (`MSG_FEEDBACK_ASK` / `MSG_FEEDBACK_DONE`);
   the notices ride the header poll as `feedback_done`. No forex-admin change.
+- **New-feedback alert on the admin node.** Where the licence admin console
+  is mounted, the title bar shows "N NEW FEEDBACK" when feedback arrives.
+  Clicking it shows the entries and marks those ids read, and the alert goes
+  away. Store rows gain `read`; rows from before it count as read. The count
+  rides the header as `feedback_unread` (always 0 off the issuer); entries
+  come from `GET /api/feedback/inbox`, `POST /api/feedback/inbox/read`.
 
 ## v0.611 — Windows install and VPS setup (2026-09-25)
 

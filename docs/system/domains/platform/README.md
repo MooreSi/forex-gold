@@ -765,6 +765,21 @@ push, because the server has no way to address "whoever sent entry X":
   write the real data directory. `tests/feedback/conftest.py` does it for that
   folder; anything else calling `submit` needs the same.
 
+**The owner's new-feedback alert (2026-11-17).** On the admin node the title
+bar shows "N NEW FEEDBACK" until the owner reads it:
+
+- Gated twice: the frontend renders it only when `useAdminConsole` says the
+  console is mounted, and `service.unread_count` returns 0 off the issuer.
+- `store.add` writes `read: False`. Only an explicit `False` is unread, so
+  entries stored before the alert existed do not light it up on upgrade.
+- The header carries the count only (`feedback_unread`); the entries are
+  fetched when clicked, because a message can be 4000 characters and the
+  header is polled every 5 s.
+- Opening the popup marks exactly the ids it showed (`POST
+  /api/feedback/inbox/read`), so feedback arriving meanwhile keeps the alert
+  lit. Read is not Completed: that switch stays in the admin console, and the
+  console's `FeedbackRow` model ignores the extra field.
+
 ## Reversal has two names, and the wire keeps the old one (2026-09-28)
 
 The engine registry (`services/engines/registry.py`) and the Signal Generator

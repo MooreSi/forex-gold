@@ -20,8 +20,10 @@ def add(entry: dict) -> bool:
         rows = _jsonfile.read(_PATH)
         if any(r.get("id") == entry["id"] for r in rows):
             return False
+        # `read` drives the admin node's "new feedback" alert. Rows stored
+        # before it existed have no such key and count as read.
         rows.append({**entry, "status": "open", "received_at": time.time(),
-                     "completed_at": 0})
+                     "completed_at": 0, "read": False})
         _jsonfile.write(_PATH, rows)
         return True
 
@@ -50,3 +52,23 @@ def completed_ids(ids) -> list[str]:
     wanted = {str(i) for i in ids}
     return [str(r["id"]) for r in _jsonfile.read(_PATH)
             if r.get("id") in wanted and r.get("status") == "completed"]
+
+
+def unread() -> list[dict]:
+    """Not yet opened from the title-bar alert. Newest first."""
+    return [r for r in list_all() if r.get("read") is False]
+
+
+def mark_read(ids) -> int:
+    """Mark `ids` read. How many changed."""
+    wanted = {str(i) for i in ids}
+    with _jsonfile.LOCK:
+        rows = _jsonfile.read(_PATH)
+        changed = 0
+        for r in rows:
+            if r.get("id") in wanted and r.get("read") is False:
+                r["read"] = True
+                changed += 1
+        if changed:
+            _jsonfile.write(_PATH, rows)
+        return changed

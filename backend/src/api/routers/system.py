@@ -106,4 +106,6 @@ async def header(eng: Any = Depends(engine_dep)) -> dict:
         # Feedback the owner has marked Completed: the "Feedback noted and
         # completed" popup. Two small file reads, and never raises.
         "feedback_done": feedback_ctl.completed_notices(),
+        # The admin node's "new feedback" alert. 0 on every other install.
+        "feedback_unread": feedback_ctl.unread_count(),
     }

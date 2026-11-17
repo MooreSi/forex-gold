@@ -45,3 +45,36 @@ async def seen(entry_id: str) -> Ok:
     if not feedback_ctl.mark_seen(entry_id):
         raise Refusal("No such notice.", status_code=404)
     return Ok(ok=True)
+
+
+class InboxRow(BaseModel):
+    id: str
+    kind: str
+    message: str
+    name: str = ""
+    email: str = ""
+    hostname: str = ""
+    version: str = ""
+    submitted_at: float = 0
+
+
+class ReadWrite(BaseModel):
+    ids: list[str]
+
+
+class ReadDone(BaseModel):
+    ok: bool
+    marked: int
+
+
+@router.get("/inbox", response_model=list[InboxRow])
+async def inbox() -> list[dict]:
+    """New feedback behind the admin node's title-bar alert. Empty on any
+    other install. The count rides the header poll (`feedback_unread`)."""
+    return feedback_ctl.unread_feedback()
+
+
+@router.post("/inbox/read", response_model=ReadDone)
+async def read(body: ReadWrite) -> ReadDone:
+    """The owner opened the alert: mark the ids it showed as read."""
+    return ReadDone(ok=True, marked=feedback_ctl.mark_read(body.ids))

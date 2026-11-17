@@ -125,6 +125,24 @@ export interface HeaderState {
    * sender has not yet closed the popup for. Oldest completion first.
    */
   feedback_done?: FeedbackDone[];
+  /**
+   * New feedback waiting for the owner, for the admin node's title-bar alert.
+   * Always 0 on any install that is not the licence issuer.
+   */
+  feedback_unread?: number;
+}
+
+/** One entry behind that alert, from `/api/feedback/inbox`. */
+export interface FeedbackInboxRow {
+  id: string;
+  kind: string;
+  message: string;
+  name: string;
+  email: string;
+  hostname: string;
+  version: string;
+  /** Unix seconds. */
+  submitted_at: number;
 }
 
 /** One "Feedback noted and completed" notice. `message` is an excerpt. */

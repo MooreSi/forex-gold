@@ -2,6 +2,7 @@ import { CircleDot, LogOut, Server, ShieldCheck } from "lucide-react";
 import { ActiveTraderControl } from "./ActiveTraderControl";
 import { EaBadge } from "./EaBadge";
 import { EnvironmentControl } from "./EnvironmentControl";
+import { FeedbackInboxBadge } from "./FeedbackInboxBadge";
 import { HeaderStats } from "./HeaderStats";
 import { PowerControl } from "./PowerControl";
 import { TradingStatusBadge } from "./TradingStatusBadge";
@@ -59,6 +60,9 @@ export function AppHeader() {
 
       <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-ink-2 lg:gap-3">
         <UpdateBadge update={data?.update ?? null} />
+        {/* New feedback, on the admin node only: gated on the same probe as the
+            Licence admin button, and the backend counts only on the issuer. */}
+        {adminConsole.available && <FeedbackInboxBadge count={data?.feedback_unread} />}
         {data?.remote_connected && (
           <Tooltip label="This node is linked to the other paired node.">
             <span className="flex items-center gap-1 text-remote">

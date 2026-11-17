@@ -91,3 +91,68 @@ class TestTheTypeListOfferedToTheUser:
         assert set(lm.LEVEL_TYPES) <= known
         assert {"asia_low", "asia_high", "swing_high", "swing_low",
                 "round_10", "round_5", "congestion", "unicorn"} <= known
+
+
+class TestRefusingATypeInTheAsianSessionOnly:
+    """Owner, 2026-11-17: drop round-number levels during the Asian session.
+
+    The 14-day benchmark had round_5 and round_10 as the worst cells and the
+    Asian session as the worst session (55% won against 76% by chance), while
+    London and NY round numbers sat near chance. Refusing them everywhere would
+    remove the sessions where they are not the problem, so this list applies
+    only while the engine reads the session as "asian". It adds to the
+    all-session list rather than replacing it.
+    """
+
+    RS = {"re_blocked_level_types": "congestion",
+          "re_asian_blocked_level_types": "round_5,round_10"}
+
+    def test_in_the_asian_session_both_lists_apply(self):
+        assert cg.blocked_level_types(self.RS, "asian") == {
+            "congestion", "round_5", "round_10"}
+
+    @pytest.mark.parametrize("session", ["london", "overlap", "ny", "off"])
+    def test_outside_the_asian_session_only_the_all_session_list_applies(self, session):
+        assert cg.blocked_level_types(self.RS, session) == {"congestion"}
+
+    def test_a_caller_that_names_no_session_gets_the_all_session_list(self):
+        """Every existing caller passes no session. Its answer must not change."""
+        assert cg.blocked_level_types(self.RS) == {"congestion"}
+
+    def test_the_session_name_is_read_case_blind(self):
+        assert "round_5" in cg.blocked_level_types(self.RS, "Asian")
+
+    def test_empty_by_default_so_nothing_new_is_refused_until_named(self):
+        assert cg.blocked_level_types({"re_asian_blocked_level_types": ""}, "asian") == set()
+
+    def test_the_filter_drops_round_numbers_in_asia_and_keeps_them_in_london(self):
+        cands = [lvl("round_5"), lvl("round_10"), lvl("swing_high")]
+        rs = {"re_asian_blocked_level_types": "round_5,round_10"}
+        assert [c["type"] for c in cs.filter_blocked_types(cands, rs, "asian")] == ["swing_high"]
+        assert cs.filter_blocked_types(cands, rs, "london") == cands
+
+
+class TestTheAsianListIsWired:
+    """Asserted separately from the behaviour: a filter nothing passes the
+    session to refuses nothing and looks healthy doing it."""
+
+    def _src(self, rel):
+        from pathlib import Path
+        return (Path(__file__).resolve().parents[2] / rel).read_text(encoding="utf-8")
+
+    def test_the_engine_passes_the_session_to_the_filter(self):
+        src = self._src("backend/src/services/reversal_engine/reversal_engine_service.py")
+        assert "filter_blocked_types(candidates, _rs, session)" in src
+
+    def test_a_migration_adds_the_column_empty_by_default(self):
+        line = next(l for l in self._src("backend/migrations/steps_recent.py").splitlines()
+                    if "ADD COLUMN re_asian_blocked_level_types" in l)
+        assert "DEFAULT ''" in line, line
+
+    def test_it_travels_to_the_node_that_trades(self):
+        from backend.src.services.cluster.sync import synced_settings as ss
+        assert "re_asian_blocked_level_types" in ss.SYNCED_SETTINGS_KEYS
+
+    def test_a_fresh_database_has_the_column_and_it_is_empty(self, fresh_db):
+        from backend.src.db import database as db
+        assert db.get_risk_settings().get("re_asian_blocked_level_types") == ""

@@ -192,4 +192,7 @@ SYNCED_SETTINGS_KEYS = (
     "round_number_exits_enabled", "vol_forecast_stops_enabled",
     # Adding to a position (migration 65): they refuse on whichever node trades.
     "never_add_to_loser_enabled", "daily_limit_counts_open_risk",
+    # Level types refused in the Asian session only (migration 66): the
+    # engine that reads it runs on whichever node trades.
+    "re_asian_blocked_level_types",
 )

@@ -100,7 +100,7 @@ async def liquidity_map_levels(bridge, now: float) -> list[dict]:
         return []
 
 
-def filter_blocked_types(candidates: list, rs: dict) -> list:
+def filter_blocked_types(candidates: list, rs: dict, session: str | None = None) -> list:
     """Drop candidates whose level type the owner has refused.
 
     A candidate with NO type is kept. An untyped level is a bug somewhere
@@ -108,7 +108,7 @@ def filter_blocked_types(candidates: list, rs: dict) -> list:
     reducing what the engine trades -- the combination this repo's rules
     exist to prevent.
     """
-    blocked = _caps.blocked_level_types(rs or {})
+    blocked = _caps.blocked_level_types(rs or {}, session)
     if not blocked:
         return candidates
     out = []

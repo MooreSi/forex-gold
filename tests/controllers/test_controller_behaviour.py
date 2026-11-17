@@ -174,6 +174,8 @@ class _FakeClient:
         self.request_stand_down = _AsyncRecorder()
         self.request_resume = _AsyncRecorder()
         self.push_ai_config = _AsyncRecorder()
+        self.request_peer_restart = _AsyncRecorder()
+        self.request_peer_update = _AsyncRecorder()
 
 
 @pytest.fixture
@@ -296,6 +298,21 @@ class TestPeerCommands:
         _run(sync_ctl.push_ai_config(updates))
 
         assert client.push_ai_config.calls == [((updates,), {})]
+
+    def test_a_peer_restart_carries_its_timeout(self, client):
+        """Restarts the VPS: the timeout decides how long the page waits
+        before telling the owner the VPS did not answer."""
+        _run(sync_ctl.restart_peer(timeout=4.0))
+
+        assert client.request_peer_restart.calls == [((), {"timeout": 4.0})]
+
+    def test_a_peer_update_carries_its_timeout(self, client, monkeypatch):
+        from backend.src.controllers import vps_update_controller as vps_ctl
+        monkeypatch.setattr(vps_ctl._client, "get_instance", lambda: client)
+
+        _run(vps_ctl.update_peer(timeout=6.0))
+
+        assert client.request_peer_update.calls == [((), {"timeout": 6.0})]
 
     def test_the_stored_link_configuration_comes_from_the_client_class(self, monkeypatch):
         """A classmethod on SyncClient rather than the singleton — read before

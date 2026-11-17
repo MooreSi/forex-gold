@@ -323,7 +323,7 @@ class ReversalEngine(_ManagementMixin, _CorrelationMixin, _LiveExecuteMixin):
         # at execution so a refused type never becomes a signal at all,
         # and so the virtual record does not fill with trades the owner
         # has already said no to.
-        candidates = _setup.filter_blocked_types(candidates, _rs)
+        candidates = _setup.filter_blocked_types(candidates, _rs, session)
         self._cached["levels"] = candidates
         # Full, unfiltered level set (asia/swing/round/congestion, no proximity
         # or score cutoff) -- used by _classify_ref_level() for REF-level

@@ -322,7 +322,7 @@ KNOWN_LEVEL_TYPES: tuple[str, ...] = (
 ) + tuple(_lmap.LEVEL_TYPES)
 
 
-def blocked_level_types(rs: dict) -> set:
+def blocked_level_types(rs: dict, session: str | None = None) -> set:
     """Level types the engine must not trade, from a comma-separated list.
 
     Empty by default, so nothing is refused until somebody names it.
@@ -339,5 +339,15 @@ def blocked_level_types(rs: dict) -> set:
     supports, and it is a list the owner controls rather than a number a
     model moved.
     """
-    raw = rs.get("re_blocked_level_types") or ""
-    return {part.strip().lower() for part in str(raw).split(",") if part.strip()}
+    out = _type_list(rs.get("re_blocked_level_types"))
+    # Owner, 2026-11-17: a second list that applies only in the Asian
+    # session, added to the first. Round numbers were the worst level cells
+    # and Asia the worst session, while London/NY round numbers sat near
+    # chance, so refusing them everywhere would cut the sessions that are fine.
+    if str(session or "").strip().lower() == "asian":
+        out |= _type_list(rs.get("re_asian_blocked_level_types"))
+    return out
+
+
+def _type_list(raw) -> set:
+    return {part.strip().lower() for part in str(raw or "").split(",") if part.strip()}

@@ -356,4 +356,11 @@ _RECENT: list[tuple[int, str, object]] = [
         "ALTER TABLE vantage_risk_settings ADD COLUMN never_add_to_loser_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE vantage_risk_settings ADD COLUMN daily_limit_counts_open_risk INTEGER NOT NULL DEFAULT 0",
     ]),
+
+    # Level types the Reversal Engine refuses in the Asian session only,
+    # added to re_blocked_level_types (owner 2026-11-17: drop round numbers
+    # in Asia). Empty, so nothing new is refused until somebody names a type.
+    (66, "Per-level-type refusal list for the Asian session, empty by default", [
+        "ALTER TABLE vantage_risk_settings ADD COLUMN re_asian_blocked_level_types TEXT NOT NULL DEFAULT ''",
+    ]),
 ]

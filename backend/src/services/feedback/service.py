@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 import logging
+import re
 import uuid
 
 from backend.src.services.feedback import notify, outbox, sent, store
@@ -21,6 +22,10 @@ log = logging.getLogger(__name__)
 KINDS = ("feature", "bug", "feedback")
 MAX_MESSAGE = 4000
 _TEXT_FIELDS = ("name", "email", "hostname", "version")
+#: Shape only: something@something.tld, no spaces. Whether it is deliverable
+#: is the owner's reply's problem; this catches the typo before it queues.
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_EMAIL = 200
 _background: set = set()
 
 
@@ -57,10 +62,29 @@ def _is_issuer() -> bool:
     return is_licence_issuer_machine()
 
 
-def submit(kind: str, message: str, *, issuer: bool | None = None) -> dict:
-    """Validate and hand off. Raises ValueError for input the user can fix."""
+def reply_email(raw: str) -> str:
+    """The sender's optional reply address, trimmed. "" when blank, or
+    ValueError when it is not shaped like an address."""
+    email = str(raw or "").strip()
+    if email and (len(email) > MAX_EMAIL or not _EMAIL.match(email)):
+        raise ValueError("That email address does not look right.")
+    return email
+
+
+def submit(kind: str, message: str, *, email: str = "",
+           issuer: bool | None = None) -> dict:
+    """Validate and hand off. Raises ValueError for input the user can fix.
+
+    `email` is the address the sender typed so the owner can reply. When
+    given it replaces the install's stored email on the entry, so every place
+    the owner reads feedback shows the one they asked to be answered at.
+    """
+    reply = reply_email(email)
+    identity = _identity()
+    if reply:
+        identity["email"] = reply
     entry = clean({"id": uuid.uuid4().hex, "kind": kind, "message": message,
-                   **_identity()})
+                   **identity})
     sent.add(entry)
     if _is_issuer() if issuer is None else issuer:
         task = asyncio.ensure_future(receive(entry))

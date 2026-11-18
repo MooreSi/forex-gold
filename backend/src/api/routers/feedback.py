@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 class FeedbackWrite(BaseModel):
     kind: str
     message: str
+    #: Optional, so the owner can reply directly. Older dashboards omit it.
+    email: str = ""
 
 
 class FeedbackSent(BaseModel):
@@ -28,7 +30,10 @@ class FeedbackSent(BaseModel):
 @router.post("", response_model=FeedbackSent)
 async def send(body: FeedbackWrite) -> FeedbackSent:
     try:
-        entry = feedback_ctl.submit(body.kind, body.message)
+        # The email only when given, so the call an older dashboard makes is
+        # exactly the call it always made.
+        entry = feedback_ctl.submit(body.kind, body.message,
+                                    **({"email": body.email} if body.email else {}))
     except ValueError as exc:
         raise Refusal(str(exc), status_code=400) from exc
     return FeedbackSent(ok=True, id=entry["id"])

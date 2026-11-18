@@ -36,12 +36,20 @@ def _telegram_text(e: dict) -> str:
     )
 
 
+def _mailto(email) -> str:
+    """The sender's address as a link the owner can click to reply."""
+    if not email:
+        return "&lt;-&gt;"
+    safe = html.escape(str(email), quote=True)
+    return f'&lt;<a href="mailto:{safe}">{safe}</a>&gt;'
+
+
 def _email_body(e: dict) -> str:
     esc = lambda v: html.escape(str(v or "-"))            # noqa: E731
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.get("submitted_at", 0)))
     return (
         f"<h3>{esc(KIND_LABEL.get(e['kind']))}</h3>"
-        f"<p><b>From:</b> {esc(e.get('name'))} &lt;{esc(e.get('email'))}&gt;<br>"
+        f"<p><b>From:</b> {esc(e.get('name'))} {_mailto(e.get('email'))}<br>"
         f"<b>Host:</b> {esc(e.get('hostname'))} &nbsp; <b>Version:</b> {esc(e.get('version'))}<br>"
         f"<b>Sent:</b> {esc(when)}</p>"
         f"<p style=\"white-space:pre-wrap\">{esc(e['message'])}</p>"

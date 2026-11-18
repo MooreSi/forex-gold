@@ -270,6 +270,12 @@ record. 57 commits since v0.611, plus this release's own change.
   away. Store rows gain `read`; rows from before it count as read. The count
   rides the header as `feedback_unread` (always 0 off the issuer); entries
   come from `GET /api/feedback/inbox`, `POST /api/feedback/inbox/read`.
+- **Reply email on the Feedback popup.** "Add your email so we can reply"
+  reveals an optional email field. When given, it replaces the install's
+  stored email on the entry, so Telegram, the alert email (now a `mailto:`
+  link), the admin console and the new-feedback popup all show it. A
+  malformed address is refused before anything queues. Older dashboards that
+  post only kind and message are unaffected.
 
 ## v0.611 — Windows install and VPS setup (2026-09-25)
 

@@ -780,6 +780,15 @@ bar shows "N NEW FEEDBACK" until the owner reads it:
   lit. Read is not Completed: that switch stays in the admin console, and the
   console's `FeedbackRow` model ignores the extra field.
 
+**Reply email (2026-11-18).** The popup's optional email (behind an "Add
+your email so we can reply" link) overwrites `email` on the entry rather than
+adding a field: the admin console's `FeedbackRow` keeps only known fields, so a
+new one would never reach it without a forex-admin change. The stored
+licence email is not kept when one is typed. `email_service.send_email` has
+no Reply-To, so the alert email links the address as `mailto:` instead. The
+router passes `email` to the controller only when given, so the call an older
+dashboard makes is unchanged. Shape check only (`service.reply_email`).
+
 ## Reversal has two names, and the wire keeps the old one (2026-09-28)
 
 The engine registry (`services/engines/registry.py`) and the Signal Generator

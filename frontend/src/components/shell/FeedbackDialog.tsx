@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/shared/Button";
 import { DialogShell } from "@/components/shared/DialogShell";
+import { Tooltip } from "@/components/shared/Tooltip";
 import { api, ApiError } from "@/api/client";
 import { cn } from "@/lib/cn";
 
@@ -28,6 +29,9 @@ interface FeedbackDialogProps {
 export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
   const [kind, setKind] = useState<string>("feature");
   const [message, setMessage] = useState("");
+  // Optional and behind a link: someone who does not want a reply sees one box.
+  const [askEmail, setAskEmail] = useState(false);
+  const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
@@ -41,6 +45,8 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       setError("");
       setMessage("");
       setKind("feature");
+      setAskEmail(false);
+      setEmail("");
     }
   };
 
@@ -48,7 +54,8 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
     setSending(true);
     setError("");
     try {
-      await api.post("/api/feedback", { kind, message });
+      const reply = email.trim();
+      await api.post("/api/feedback", reply ? { kind, message, email: reply } : { kind, message });
       setSent(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not send. Try again in a moment.");
@@ -118,6 +125,33 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
             aria-label="Your feedback"
             className="w-full resize-y rounded border border-line bg-surface-1 p-2 text-xs text-ink-1 placeholder:text-ink-3 focus:border-accent focus:outline-none"
           />
+          {askEmail ? (
+            <label className="block space-y-1">
+              <span className="text-[11px] text-ink-3">
+                Your email, so we can reply to you directly (optional)
+              </span>
+              <Tooltip label="Optional. We only use it to reply to this feedback.">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  maxLength={200}
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  aria-label="Your email"
+                  className="w-full rounded border border-line bg-surface-1 p-2 text-xs text-ink-1 placeholder:text-ink-3 focus:border-accent focus:outline-none"
+                />
+              </Tooltip>
+            </label>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAskEmail(true)}
+              className="text-[11px] text-accent hover:underline"
+            >
+              Add your email so we can reply
+            </button>
+          )}
           {error && <p role="alert" className="text-xs text-loss">{error}</p>}
         </div>
       )}

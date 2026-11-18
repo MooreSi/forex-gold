@@ -12,9 +12,10 @@ __all__ = ["submit", "completed_notices", "mark_seen", "unread_count",
 MAX_MESSAGE = _service.MAX_MESSAGE
 
 
-def submit(kind: str, message: str) -> dict:
-    """Queue or record the feedback. Raises ValueError with a user-readable reason."""
-    return _service.submit(kind, message)
+def submit(kind: str, message: str, email: str = "") -> dict:
+    """Queue or record the feedback. Raises ValueError with a user-readable
+    reason. `email` is the sender's optional reply address."""
+    return _service.submit(kind, message, email=email)
 
 
 def completed_notices() -> list[dict]:
